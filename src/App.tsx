@@ -9,9 +9,6 @@ import {
   ExamMode,
 } from './types';
 import {
-  getDemoUsers,
-  getDemoStudentProfile,
-  getDemoInstructorProfile,
   getRoutes,
   getRoadWarnings,
   getExamSessions,
@@ -37,11 +34,29 @@ import { ExamDrivingView } from './components/exam/ExamDrivingView';
 import { ExamReportView } from './components/exam/ExamReportView';
 
 import { AdminDashboard } from './components/admin/AdminDashboard';
+import { AuthScreen } from './components/auth/AuthScreen';
+import { watchAuth, logoutUser } from './services/auth';
+import { onCloudChange } from './services/cloudStore';
+import { ensureStudentProfile, getStudentProfileByUserId, setCurrentUser, getCurrentUser } from './services/db';
 
 export function App() {
-  const [users] = useState<User[]>(getDemoUsers());
-  const [currentRole, setCurrentRole] = useState<UserRole>('STUDENT');
-  const currentUser = users.find((u) => u.role === currentRole) || users[0];
+  // რეალური ავტორიზაცია — Firebase Auth
+  const [currentUser, setCurrentUserState] = useState<User | null>(getCurrentUser());
+  const [authReady, setAuthReady] = useState(false);
+  const [currentRole, setCurrentRole] = useState<UserRole>(currentUser?.role ?? 'STUDENT');
+  // ღრუბლიდან მონაცემის მოსვლისას ინტერფეისი ხელახლა უნდა დაიხატოს
+  const [, setCloudTick] = useState(0);
+
+  useEffect(() => onCloudChange(() => setCloudTick((t) => t + 1)), []);
+
+  useEffect(() => {
+    return watchAuth((user, role) => {
+      setCurrentUserState(user);
+      setCurrentUser(user);
+      if (role) setCurrentRole(role);
+      setAuthReady(true);
+    });
+  }, []);
 
   const [activeCity, setActiveCity] = useState<string>('Telavi');
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -52,11 +67,23 @@ export function App() {
   // Data
   const routes = getRoutes().filter((r) => r.city.toLowerCase() === activeCity.toLowerCase());
   const roadWarnings = getRoadWarnings();
-  const [sessions, setSessions] = useState<ExamSession[]>(getExamSessions());
+  const sessions: ExamSession[] = getExamSessions();
 
   // Profiles
-  const [studentProfile, setStudentProfile] = useState<StudentProfile>(getDemoStudentProfile());
-  const instructorProfile: InstructorProfile = getDemoInstructorProfile();
+  // მოსწავლის პროფილი — რეალური, ნულოვანი სტატისტიკით ახალ ანგარიშზე
+  const studentProfile: StudentProfile | null = currentUser
+    ? getStudentProfileByUserId(currentUser.id) ?? ensureStudentProfile(currentUser)
+    : null;
+
+  const instructorProfile: InstructorProfile = {
+    id: `ip-${currentUser?.id ?? 'none'}`,
+    userId: currentUser?.id ?? '',
+    mainCity: currentUser?.preferredCity ?? 'Telavi',
+    categories: [currentUser?.category ?? 'B'],
+    transmission: currentUser?.transmission ?? 'MANUAL',
+    phone: currentUser?.phone ?? '',
+    activeStudentsCount: 0,
+  };
 
   // Selected Student for Instructor view
   const [selectedStudentForInstructor, setSelectedStudentForInstructor] = useState<StudentProfile | null>(null);
@@ -70,10 +97,10 @@ export function App() {
 
   useEffect(() => {
     // Check if user has accepted consent
-    if (!hasAcceptedConsent(currentUser.id)) {
+    if (currentUser && !hasAcceptedConsent(currentUser.id)) {
       setIsSafetyModalOpen(true);
     }
-  }, [currentUser.id]);
+  }, [currentUser?.id]);
 
   // Handle Start Exam Click
   const handleStartExamFlow = (mode: ExamMode, route?: RouteVersion) => {
@@ -105,34 +132,34 @@ export function App() {
     if (!examEngine) return;
     const finalSession = examEngine.finishExam();
     saveExamSession(finalSession);
-    setSessions(getExamSessions());
     setCompletedSession(finalSession);
     setExamState('REPORT');
 
-    // Update student stats
-    if (finalSession.result === 'PASS') {
-      setStudentProfile((prev) => ({
-        ...prev,
-        totalSimulations: prev.totalSimulations + 1,
-        totalPasses: prev.totalPasses + 1,
-        totalDrivingMinutes: prev.totalDrivingMinutes + Math.round(finalSession.durationSeconds / 60),
-      }));
-    } else {
-      setStudentProfile((prev) => ({
-        ...prev,
-        totalSimulations: prev.totalSimulations + 1,
-        totalFails: prev.totalFails + 1,
-        totalDrivingMinutes: prev.totalDrivingMinutes + Math.round(finalSession.durationSeconds / 60),
-      }));
-    }
+    // სტატისტიკას გადათვლის saveExamSession() რეალური სესიების მიხედვით
   };
+
+  // ავტორიზაციის კარიბჭე — შესვლის გარეშე აპლიკაცია არ იხსნება
+  if (!authReady) {
+    return (
+      <div className="min-h-dvh bg-slate-950 flex items-center justify-center">
+        <p className="text-slate-400 text-sm">იტვირთება…</p>
+      </div>
+    );
+  }
+
+  if (!currentUser || !studentProfile) {
+    return <AuthScreen onAuthenticated={(u) => { setCurrentUserState(u); setCurrentRole(u.role); }} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans">
       {/* Header Navigation */}
       <Header
         currentUser={currentUser}
+        onLogout={() => { void logoutUser(); }}
         onRoleChange={(role) => {
+          // როლს ცვლის მხოლოდ ადმინი — სხვისთვის როლი Firestore-იდან მოდის
+          if (currentUser.role !== 'ADMIN' && currentUser.role !== 'SUPER_ADMIN') return;
           setCurrentRole(role);
           setActiveTab('dashboard');
           setSelectedStudentForInstructor(null);

@@ -1,11 +1,12 @@
 import React from 'react';
 import { User, UserRole } from '../../types';
-import { ShieldCheck, Car, UserCheck, Settings, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, Car, UserCheck, Settings, AlertTriangle, LogOut } from 'lucide-react';
 
 interface HeaderProps {
   currentUser: User;
   onRoleChange: (role: UserRole) => void;
   onOpenDisclaimer: () => void;
+  onLogout?: () => void;
   activeCity: string;
   onCityChange: (city: string) => void;
 }
@@ -14,6 +15,7 @@ export const Header: React.FC<HeaderProps> = ({
   currentUser,
   onRoleChange,
   onOpenDisclaimer,
+  onLogout,
   activeCity,
   onCityChange,
 }) => {
@@ -55,7 +57,9 @@ export const Header: React.FC<HeaderProps> = ({
             <option value="Batumi">ბათუმი</option>
           </select>
 
-          {/* Role Switcher */}
+          {/* როლის გადამრთველი — მხოლოდ ადმინისთვის.
+              ჩვეულებრივი მომხმარებელი როლს თავად ვერ იცვლის. */}
+          {(currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN') && (
           <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-lg flex items-center text-xs font-semibold">
             <button
               onClick={() => onRoleChange('STUDENT')}
@@ -88,6 +92,7 @@ export const Header: React.FC<HeaderProps> = ({
               ადმინი
             </button>
           </div>
+          )}
 
           {/* Disclaimer Button */}
           <button
@@ -97,6 +102,17 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <AlertTriangle className="w-5 h-5 text-amber-500" />
           </button>
+
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              title="გასვლა"
+              aria-label="ანგარიშიდან გასვლა"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </div>
     </header>

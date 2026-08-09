@@ -1,3 +1,12 @@
+/**
+ * მონაცემთა შრე — Firestore-ზე, სინქრონული API-ის შენარჩუნებით.
+ *
+ * წაკითხვა ხდება მეხსიერების ქეშიდან (cloudStore), ჩაწერა — პირდაპირ Firestore-ში.
+ * ამიტომ ფუნქციების ხელმოწერები უცვლელია და კომპონენტების გადაწერა არ დასჭირდა.
+ *
+ * ცნობარები (მარშრუტები, წესები, კითხვები, ხმები) ლოკალურად ითესება, თუ
+ * Firestore ცარიელია — ასე აპლიკაცია მუშაობს ბაზის შევსებამდეც.
+ */
 import {
   User,
   StudentProfile,
@@ -11,295 +20,292 @@ import {
   TechnicalQuestion,
   AudioAsset,
   AuditLog,
+  UserRole,
 } from '../types';
 import {
-  DEMO_USERS,
-  DEMO_STUDENT_PROFILE,
-  DEMO_INSTRUCTOR_PROFILE,
   TELAVI_ROUTES,
   DEFAULT_GEORGIA_RULESET,
   TECHNICAL_QUESTIONS,
   DEFAULT_AUDIO_ASSETS,
   DEFAULT_ROAD_WARNINGS,
 } from '../data/initialData';
+import { COLLECTIONS } from './firebase';
+import { readAll, readOne, seedIfEmpty, writeOne } from './cloudStore';
 
-const KEYS = {
-  CURRENT_USER: 'driving_sim_current_user',
-  USERS: 'driving_sim_users',
-  STUDENT_PROFILES: 'driving_sim_student_profiles',
-  INSTRUCTOR_PROFILES: 'driving_sim_instructor_profiles',
-  ROUTES: 'driving_sim_routes',
-  RULESETS: 'driving_sim_rulesets',
-  EXAM_SESSIONS: 'driving_sim_exam_sessions',
-  CONSENTS: 'driving_sim_consents',
-  LESSON_NOTES: 'driving_sim_lesson_notes',
-  ROAD_WARNINGS: 'driving_sim_road_warnings',
-  TECH_QUESTIONS: 'driving_sim_tech_questions',
-  AUDIO_ASSETS: 'driving_sim_audio_assets',
-  AUDIT_LOGS: 'driving_sim_audit_logs',
-};
+const CURRENT_USER_KEY = 'driving_sim_current_user';
 
-// Initialize default storage if empty
+/** ცნობარების ლოკალური თესვა — Firestore-ის ცარიელობისას */
 export function initDatabase() {
-  if (!localStorage.getItem(KEYS.USERS)) {
-    localStorage.setItem(KEYS.USERS, JSON.stringify(DEMO_USERS));
-  }
-  if (!localStorage.getItem(KEYS.STUDENT_PROFILES)) {
-    localStorage.setItem(KEYS.STUDENT_PROFILES, JSON.stringify([DEMO_STUDENT_PROFILE]));
-  }
-  if (!localStorage.getItem(KEYS.INSTRUCTOR_PROFILES)) {
-    localStorage.setItem(KEYS.INSTRUCTOR_PROFILES, JSON.stringify([DEMO_INSTRUCTOR_PROFILE]));
-  }
-  if (!localStorage.getItem(KEYS.ROUTES)) {
-    localStorage.setItem(KEYS.ROUTES, JSON.stringify(TELAVI_ROUTES));
-  }
-  if (!localStorage.getItem(KEYS.RULESETS)) {
-    localStorage.setItem(KEYS.RULESETS, JSON.stringify([DEFAULT_GEORGIA_RULESET]));
-  }
-  if (!localStorage.getItem(KEYS.ROAD_WARNINGS)) {
-    localStorage.setItem(KEYS.ROAD_WARNINGS, JSON.stringify(DEFAULT_ROAD_WARNINGS));
-  }
-  if (!localStorage.getItem(KEYS.TECH_QUESTIONS)) {
-    localStorage.setItem(KEYS.TECH_QUESTIONS, JSON.stringify(TECHNICAL_QUESTIONS));
-  }
-  if (!localStorage.getItem(KEYS.AUDIO_ASSETS)) {
-    localStorage.setItem(KEYS.AUDIO_ASSETS, JSON.stringify(DEFAULT_AUDIO_ASSETS));
-  }
-  if (!localStorage.getItem(KEYS.CURRENT_USER)) {
-    localStorage.setItem(KEYS.CURRENT_USER, JSON.stringify(DEMO_USERS[0]));
+  seedIfEmpty(COLLECTIONS.routes, TELAVI_ROUTES as unknown as { id: string }[]);
+  seedIfEmpty(COLLECTIONS.ruleSets, [DEFAULT_GEORGIA_RULESET] as unknown as { id: string }[]);
+  seedIfEmpty(
+    COLLECTIONS.questions,
+    TECHNICAL_QUESTIONS as unknown as { id: string }[],
+  );
+  seedIfEmpty(
+    COLLECTIONS.audio,
+    DEFAULT_AUDIO_ASSETS.map((a) => ({ ...a, id: a.key })) as unknown as { id: string }[],
+  );
+  seedIfEmpty(COLLECTIONS.warnings, DEFAULT_ROAD_WARNINGS as unknown as { id: string }[]);
+}
+
+/* ─────────────────── მომხმარებელი ─────────────────── */
+
+/** ავტორიზებული მომხმარებელი; ავთენტიფიკაციას მართავს services/auth.ts */
+export function getCurrentUser(): User | null {
+  try {
+    const raw = localStorage.getItem(CURRENT_USER_KEY);
+    return raw ? (JSON.parse(raw) as User) : null;
+  } catch {
+    return null;
   }
 }
 
-// User & Auth Management
-export function getCurrentUser(): User {
-  initDatabase();
-  const raw = localStorage.getItem(KEYS.CURRENT_USER);
-  return raw ? JSON.parse(raw) : DEMO_USERS[0];
-}
-
-export function setCurrentUser(user: User) {
-  localStorage.setItem(KEYS.CURRENT_USER, JSON.stringify(user));
+export function setCurrentUser(user: User | null) {
+  if (user) localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+  else localStorage.removeItem(CURRENT_USER_KEY);
 }
 
 export function getAllUsers(): User[] {
-  initDatabase();
-  const raw = localStorage.getItem(KEYS.USERS);
-  return raw ? JSON.parse(raw) : DEMO_USERS;
+  return readAll<User>(COLLECTIONS.users);
 }
 
 export const getDemoUsers = getAllUsers;
 
 export function saveUser(user: User) {
-  const users = getAllUsers();
-  const index = users.findIndex((u) => u.id === user.id);
-  if (index >= 0) {
-    users[index] = user;
-  } else {
-    users.push(user);
-  }
-  localStorage.setItem(KEYS.USERS, JSON.stringify(users));
+  writeOne(COLLECTIONS.users, user.id, user as unknown as Record<string, unknown>);
 }
 
-// Student Profiles
+/* ─────────────────── მოსწავლის პროფილი ─────────────────── */
+
 export function getStudentProfiles(): StudentProfile[] {
-  initDatabase();
-  const raw = localStorage.getItem(KEYS.STUDENT_PROFILES);
-  return raw ? JSON.parse(raw) : [DEMO_STUDENT_PROFILE];
+  return readAll<StudentProfile>(COLLECTIONS.studentProfiles);
 }
-
-export const getDemoStudentProfile = (): StudentProfile => getStudentProfiles()[0] || DEMO_STUDENT_PROFILE;
 
 export function getStudentProfileByUserId(userId: string): StudentProfile | undefined {
   return getStudentProfiles().find((p) => p.userId === userId);
 }
 
+/** პროფილი არ არსებობს — იქმნება ცარიელი, ნულოვანი სტატისტიკით */
+export function ensureStudentProfile(user: User): StudentProfile {
+  const existing = getStudentProfileByUserId(user.id);
+  if (existing) return existing;
+
+  const profile: StudentProfile = {
+    id: `sp-${user.id}`,
+    userId: user.id,
+    preferredCity: user.preferredCity,
+    category: user.category,
+    transmission: user.transmission,
+    preparationScore: 0,
+    totalSimulations: 0,
+    totalPasses: 0,
+    totalFails: 0,
+    totalDrivingMinutes: 0,
+    frequentMistakes: [],
+    createdAt: new Date().toISOString(),
+  };
+  saveStudentProfile(profile);
+  return profile;
+}
+
 export function saveStudentProfile(profile: StudentProfile) {
-  const profiles = getStudentProfiles();
-  const index = profiles.findIndex((p) => p.id === profile.id);
-  if (index >= 0) {
-    profiles[index] = profile;
-  } else {
-    profiles.push(profile);
-  }
-  localStorage.setItem(KEYS.STUDENT_PROFILES, JSON.stringify(profiles));
+  writeOne(
+    COLLECTIONS.studentProfiles,
+    profile.id,
+    profile as unknown as Record<string, unknown>,
+  );
 }
 
-// Instructor Profiles
 export function getInstructorProfiles(): InstructorProfile[] {
-  initDatabase();
-  const raw = localStorage.getItem(KEYS.INSTRUCTOR_PROFILES);
-  return raw ? JSON.parse(raw) : [DEMO_INSTRUCTOR_PROFILE];
+  return readAll<InstructorProfile>(COLLECTIONS.instructorProfiles);
 }
-
-export const getDemoInstructorProfile = (): InstructorProfile => getInstructorProfiles()[0] || DEMO_INSTRUCTOR_PROFILE;
 
 export function getInstructorProfileByUserId(userId: string): InstructorProfile | undefined {
   return getInstructorProfiles().find((p) => p.userId === userId);
 }
 
-// Consent Management
+export function saveInstructorProfile(profile: InstructorProfile) {
+  writeOne(
+    COLLECTIONS.instructorProfiles,
+    profile.id,
+    profile as unknown as Record<string, unknown>,
+  );
+}
+
+/* ─────────────────── თანხმობა ─────────────────── */
+
 export function getConsents(): ConsentRecord[] {
-  const raw = localStorage.getItem(KEYS.CONSENTS);
-  return raw ? JSON.parse(raw) : [];
+  return readAll<ConsentRecord>(COLLECTIONS.consents);
 }
 
 export function saveConsent(consent: ConsentRecord) {
-  const consents = getConsents();
-  consents.push(consent);
-  localStorage.setItem(KEYS.CONSENTS, JSON.stringify(consents));
+  writeOne(COLLECTIONS.consents, consent.id, consent as unknown as Record<string, unknown>);
+  // ლოკალური ასლი — გვერდის გადატვირთვისას ფანჯარა ხელახლა არ უნდა გამოჩნდეს
+  try {
+    localStorage.setItem(`consent_${consent.userId}_${consent.disclaimerVersion}`, '1');
+  } catch {
+    /* კვოტა */
+  }
 }
 
 export function hasUserAcceptedConsent(userId: string, disclaimerVersion = '2026-v1'): boolean {
-  const consents = getConsents();
-  return consents.some((c) => c.userId === userId && c.disclaimerVersion === disclaimerVersion && c.termsAccepted);
+  if (localStorage.getItem(`consent_${userId}_${disclaimerVersion}`) === '1') return true;
+  return getConsents().some(
+    (c) => c.userId === userId && c.disclaimerVersion === disclaimerVersion,
+  );
 }
 
-// Routes
+/* ─────────────────── მარშრუტები ─────────────────── */
+
 export function getRoutes(): RouteVersion[] {
   initDatabase();
-  const raw = localStorage.getItem(KEYS.ROUTES);
-  return raw ? JSON.parse(raw) : TELAVI_ROUTES;
+  return readAll<RouteVersion>(COLLECTIONS.routes).sort(
+    (a, b) => a.routeNumber - b.routeNumber,
+  );
 }
 
 export function getRoutesByCity(city: string): RouteVersion[] {
-  return getRoutes().filter((r) => r.city.toLowerCase() === city.toLowerCase() && r.status !== 'ARCHIVED');
+  return getRoutes().filter((r) => r.city.toLowerCase() === city.toLowerCase());
 }
 
 export function saveRoute(route: RouteVersion) {
-  const routes = getRoutes();
-  const index = routes.findIndex((r) => r.id === route.id);
-  if (index >= 0) {
-    routes[index] = route;
-  } else {
-    routes.push(route);
-  }
-  localStorage.setItem(KEYS.ROUTES, JSON.stringify(routes));
+  writeOne(COLLECTIONS.routes, route.id, route as unknown as Record<string, unknown>);
 }
 
-// Road Warnings
 export function getRoadWarnings(): RoadWarning[] {
   initDatabase();
-  const raw = localStorage.getItem(KEYS.ROAD_WARNINGS);
-  return raw ? JSON.parse(raw) : DEFAULT_ROAD_WARNINGS;
+  return readAll<RoadWarning>(COLLECTIONS.warnings);
 }
 
 export function saveRoadWarning(warning: RoadWarning) {
-  const warnings = getRoadWarnings();
-  warnings.push(warning);
-  localStorage.setItem(KEYS.ROAD_WARNINGS, JSON.stringify(warnings));
+  writeOne(COLLECTIONS.warnings, warning.id, warning as unknown as Record<string, unknown>);
 }
 
-// RuleSets
+/* ─────────────────── წესები ─────────────────── */
+
 export function getRuleSets(): ExamRuleSet[] {
   initDatabase();
-  const raw = localStorage.getItem(KEYS.RULESETS);
-  return raw ? JSON.parse(raw) : [DEFAULT_GEORGIA_RULESET];
+  return readAll<ExamRuleSet>(COLLECTIONS.ruleSets);
 }
 
 export const getRulesets = getRuleSets;
 
 export function getActiveRuleSet(): ExamRuleSet {
-  const sets = getRuleSets();
-  return sets[0] || DEFAULT_GEORGIA_RULESET;
+  return getRuleSets()[0] ?? DEFAULT_GEORGIA_RULESET;
 }
 
 export const getRuleSet = getActiveRuleSet;
 export const hasAcceptedConsent = hasUserAcceptedConsent;
 
 export function saveRuleSet(ruleSet: ExamRuleSet) {
-  const sets = getRuleSets();
-  const index = sets.findIndex((s) => s.id === ruleSet.id);
-  if (index >= 0) {
-    sets[index] = ruleSet;
-  } else {
-    sets.unshift(ruleSet);
-  }
-  localStorage.setItem(KEYS.RULESETS, JSON.stringify(sets));
+  writeOne(COLLECTIONS.ruleSets, ruleSet.id, ruleSet as unknown as Record<string, unknown>);
 }
 
-// Exam Sessions
+/* ─────────────────── საგამოცდო სესიები ─────────────────── */
+
 export function getExamSessions(): ExamSession[] {
-  const raw = localStorage.getItem(KEYS.EXAM_SESSIONS);
-  return raw ? JSON.parse(raw) : [];
+  return readAll<ExamSession>(COLLECTIONS.sessions).sort((a, b) =>
+    b.startedAt.localeCompare(a.startedAt),
+  );
 }
 
 export function saveExamSession(session: ExamSession) {
-  const sessions = getExamSessions();
-  const index = sessions.findIndex((s) => s.id === session.id);
-  if (index >= 0) {
-    sessions[index] = session;
-  } else {
-    sessions.unshift(session);
-  }
-  localStorage.setItem(KEYS.EXAM_SESSIONS, JSON.stringify(sessions));
+  writeOne(COLLECTIONS.sessions, session.id, session as unknown as Record<string, unknown>);
 
-  // Recalculate student stats if user is student
+  // სესიის შემდეგ მოსწავლის სტატისტიკა გადაითვლება რეალური მონაცემებით
   const profile = getStudentProfileByUserId(session.userId);
-  if (profile) {
-    const userSessions = sessions.filter((s) => s.userId === session.userId && s.result !== 'INCOMPLETE');
-    const total = userSessions.length;
-    const passes = userSessions.filter((s) => s.result === 'PASS').length;
-    const fails = userSessions.filter((s) => s.result === 'FAIL').length;
-    const totalSec = userSessions.reduce((acc, s) => acc + (s.durationSeconds || 0), 0);
+  if (!profile || session.result === 'INCOMPLETE') return;
 
-    profile.totalSimulations = total;
-    profile.totalPasses = passes;
-    profile.totalFails = fails;
-    profile.totalDrivingMinutes = Math.round(totalSec / 60);
-    profile.preparationScore = total > 0 ? Math.round((passes / total) * 100) : 50;
+  const own = getExamSessions().filter(
+    (s) => s.userId === session.userId && s.result !== 'INCOMPLETE',
+  );
+  const passes = own.filter((s) => s.result === 'PASS').length;
+  const fails = own.filter((s) => s.result === 'FAIL').length;
+  const minutes = Math.round(own.reduce((sum, s) => sum + s.durationSeconds, 0) / 60);
 
-    saveStudentProfile(profile);
-  }
+  const mistakes = new Map<string, number>();
+  own.forEach((s) =>
+    s.errorEvents?.forEach((e) => {
+      if (e.isUndone) return;
+      mistakes.set(e.ruleNameKa, (mistakes.get(e.ruleNameKa) ?? 0) + 1);
+    }),
+  );
+  const frequent = [...mistakes.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name]) => name);
+
+  saveStudentProfile({
+    ...profile,
+    totalSimulations: own.length,
+    totalPasses: passes,
+    totalFails: fails,
+    totalDrivingMinutes: minutes,
+    frequentMistakes: frequent,
+    preparationScore: own.length === 0 ? 0 : Math.round((passes / own.length) * 100),
+  });
 }
 
 export function getExamSessionsByUserId(userId: string): ExamSession[] {
   return getExamSessions().filter((s) => s.userId === userId);
 }
 
-// Technical Questions
+/* ─────────────────── ცნობარები ─────────────────── */
+
 export function getTechnicalQuestions(): TechnicalQuestion[] {
   initDatabase();
-  const raw = localStorage.getItem(KEYS.TECH_QUESTIONS);
-  return raw ? JSON.parse(raw) : TECHNICAL_QUESTIONS;
+  return readAll<TechnicalQuestion>(COLLECTIONS.questions);
 }
 
-// Audio Assets
 export function getAudioAssets(): AudioAsset[] {
   initDatabase();
-  const raw = localStorage.getItem(KEYS.AUDIO_ASSETS);
-  return raw ? JSON.parse(raw) : DEFAULT_AUDIO_ASSETS;
+  return readAll<AudioAsset>(COLLECTIONS.audio);
 }
 
-// Lesson Notes
+/* ─────────────────── გაკვეთილის შენიშვნები ─────────────────── */
+
 export function getLessonNotes(studentProfileId: string): LessonNote[] {
-  const raw = localStorage.getItem(KEYS.LESSON_NOTES);
-  const notes: LessonNote[] = raw ? JSON.parse(raw) : [];
-  return notes.filter((n) => n.studentProfileId === studentProfileId);
+  return readAll<LessonNote>(COLLECTIONS.lessonNotes).filter(
+    (n) => n.studentProfileId === studentProfileId,
+  );
 }
 
 export function saveLessonNote(note: LessonNote) {
-  const raw = localStorage.getItem(KEYS.LESSON_NOTES);
-  const notes: LessonNote[] = raw ? JSON.parse(raw) : [];
-  notes.unshift(note);
-  localStorage.setItem(KEYS.LESSON_NOTES, JSON.stringify(notes));
+  writeOne(COLLECTIONS.lessonNotes, note.id, note as unknown as Record<string, unknown>);
 }
 
-// Audit Logs
-export function addAuditLog(userId: string, userRole: any, action: string, details: string) {
-  const raw = localStorage.getItem(KEYS.AUDIT_LOGS);
-  const logs: AuditLog[] = raw ? JSON.parse(raw) : [];
-  logs.unshift({
-    id: 'audit-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+/* ─────────────────── აუდიტი ─────────────────── */
+
+export function addAuditLog(
+  userId: string,
+  userRole: UserRole,
+  action: string,
+  details: string,
+) {
+  const log: AuditLog = {
+    id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     userId,
     userRole,
     action,
     details,
     timestamp: new Date().toISOString(),
-  });
-  localStorage.setItem(KEYS.AUDIT_LOGS, JSON.stringify(logs.slice(0, 200)));
+  };
+  writeOne(COLLECTIONS.audit, log.id, log as unknown as Record<string, unknown>);
 }
 
 export function getAuditLogs(): AuditLog[] {
-  const raw = localStorage.getItem(KEYS.AUDIT_LOGS);
-  return raw ? JSON.parse(raw) : [];
+  return readAll<AuditLog>(COLLECTIONS.audit).sort((a, b) =>
+    b.timestamp.localeCompare(a.timestamp),
+  );
+}
+
+/** ადმინის ინსტრუმენტი — ლოკალური ცნობარები Firestore-ში ატვირთვა */
+export async function pushSeedToCloud(): Promise<void> {
+  getRoutes().forEach(saveRoute);
+  getRuleSets().forEach(saveRuleSet);
+  getRoadWarnings().forEach(saveRoadWarning);
+  getTechnicalQuestions().forEach((q) =>
+    writeOne(COLLECTIONS.questions, q.id, q as unknown as Record<string, unknown>),
+  );
 }
