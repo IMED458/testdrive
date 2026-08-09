@@ -1,0 +1,105 @@
+rules_version = '2';
+
+// Firestore-ის უსაფრთხოების წესები.
+// Firebase-ის ვებ-კონფიგი საჯაროა — ნამდვილი დაცვა სწორედ აქ ხდება.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (role() == 'ADMIN' || role() == 'SUPER_ADMIN');
+    }
+
+    function isInstructor() {
+      return isSignedIn() && role() == 'INSTRUCTOR';
+    }
+
+    // მომხმარებელი ხედავს და ცვლის მხოლოდ საკუთარ ჩანაწერს.
+    // როლს თავად ვერ იცვლის — თორემ ნებისმიერს ADMIN გახდომა შეეძლებოდა.
+    match /users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin() || isInstructor());
+      allow create: if isSignedIn() && request.auth.uid == uid
+                    && request.resource.data.role == 'STUDENT';
+      allow update: if isSignedIn() && request.auth.uid == uid
+                    && request.resource.data.role == resource.data.role;
+      allow write: if isAdmin();
+    }
+
+    // მოსწავლის პროფილს ხედავს თავად მოსწავლე და მისი ინსტრუქტორი.
+    // ინსტრუქტორი A ვერ ხედავს ინსტრუქტორ B-ის მოსწავლეებს.
+    match /studentProfiles/{id} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.instructorId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.instructorId == request.auth.uid ||
+        isAdmin()
+      );
+    }
+
+    match /instructorProfiles/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // საგამოცდო სესია — მოსწავლე და მისი ინსტრუქტორი.
+    // წაშლა აკრძალულია: შედეგების ისტორია არ უნდა იშლებოდეს.
+    match /examSessions/{id} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.instructorId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isSignedIn() && request.resource.data.userId is string;
+      allow update: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.instructorId == request.auth.uid ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /consents/{id} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /lessonNotes/{id} {
+      allow read, write: if isSignedIn() && (
+        request.resource.data.instructorId == request.auth.uid ||
+        (resource != null && resource.data.instructorId == request.auth.uid) ||
+        isAdmin()
+      );
+    }
+
+    // საცნობარო მონაცემები: ყველა კითხულობს, მხოლოდ ადმინი წერს.
+    match /routeVersions/{id}      { allow read: if true; allow write: if isAdmin(); }
+    match /ruleSets/{id}           { allow read: if true; allow write: if isAdmin(); }
+    match /technicalQuestions/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /audioAssets/{id}        { allow read: if true; allow write: if isAdmin(); }
+    match /roadWarnings/{id}       { allow read: if true; allow write: if isAdmin(); }
+
+    // აუდიტის ჟურნალი — მხოლოდ დამატება, რედაქტირება/წაშლა აკრძალულია.
+    match /auditLogs/{id} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
