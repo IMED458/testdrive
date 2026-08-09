@@ -13,8 +13,9 @@ import {
   AlertTriangle,
   Clock,
   ExternalLink,
+  UploadCloud,
 } from 'lucide-react';
-import { getRoutes, saveRoute, getRulesets, getAuditLogs } from '../../services/db';
+import { getRoutes, saveRoute, getRulesets, getAuditLogs, pushSeedToCloud } from '../../services/db';
 
 export const AdminDashboard: React.FC<{ adminName?: string }> = ({ adminName }) => {
   const [activeTab, setActiveTab] = useState<'ROUTES' | 'RULES' | 'AUDIO' | 'AUDIT'>('ROUTES');
@@ -23,6 +24,18 @@ export const AdminDashboard: React.FC<{ adminName?: string }> = ({ adminName }) 
   const auditLogs = getAuditLogs();
 
   const [selectedRoute, setSelectedRoute] = useState<RouteVersion | null>(null);
+  const [seedState, setSeedState] = useState<'IDLE' | 'BUSY' | 'DONE' | 'ERROR'>('IDLE');
+
+  /** ლოკალური ცნობარები (მარშრუტები, წესები, კითხვები) Firestore-ში ატვირთვა */
+  async function handleSeed() {
+    setSeedState('BUSY');
+    try {
+      await pushSeedToCloud();
+      setSeedState('DONE');
+    } catch {
+      setSeedState('ERROR');
+    }
+  }
 
   return (
     <div className="space-y-6 pb-20 md:pb-8">
@@ -36,6 +49,22 @@ export const AdminDashboard: React.FC<{ adminName?: string }> = ({ adminName }) 
           <p className="text-xs text-slate-300 mt-1">
             საგამოცდო წესები, მარშრუტების ვერსიები, ხმოვანი აქტივები და აუდიტის ლოგები
           </p>
+
+          {/* ბაზის შევსება — ერთჯერადი ოპერაცია ახალ პროექტზე */}
+          <button
+            onClick={handleSeed}
+            disabled={seedState === 'BUSY'}
+            className="mt-3 flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700"
+          >
+            <UploadCloud className="w-4 h-4" />
+            {seedState === 'BUSY'
+              ? 'იტვირთება…'
+              : seedState === 'DONE'
+                ? 'ცნობარები ატვირთულია ✓'
+                : seedState === 'ERROR'
+                  ? 'ვერ აიტვირთა — შეამოწმე წესები'
+                  : 'ცნობარების ატვირთვა ბაზაში'}
+          </button>
         </div>
 
         {/* Tab switcher */}
