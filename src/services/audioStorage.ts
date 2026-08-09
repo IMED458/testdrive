@@ -1,30 +1,48 @@
 /**
- * ხმოვანი ფაილების მართვა — ატვირთვა Firebase Storage-ში, მეტამონაცემები Firestore-ში.
+ * ხმოვანი ფაილების მართვა — Firestore-ში, base64-ად.
  *
- * ადმინი თითოეულ ხმოვან key-ს ურთავს ჩაწერილ ფაილს.
- * აპლიკაცია ჯერ ეძებს ატვირთულ ფაილს; თუ არ არის — ბრაუზერის სინთეზურ ხმაზე გადადის.
+ * რატომ არა Firebase Storage: ის Blaze (ფასიან) გეგმას მოითხოვს.
+ * რატომ არა Cloudinary: ცალკე ანგარიში, API-გასაღები და საჯაროდ
+ * ბოროტად გამოსაყენებელი unsigned upload preset დასჭირდებოდა.
+ *
+ * ერთი ხმოვანი ფრაზა 2–3 წამია (~20–40 კბ). Firestore-ის დოკუმენტის
+ * ლიმიტი 1 მბ-ია, ანუ თითო ფრაზა თავისუფლად ეტევა ცალკე დოკუმენტში.
+ * base64 მოცულობას ~33%-ით ზრდის, ამიტომ ნედლი ლიმიტი 400 კბ-ია.
  */
 import { doc, getDocs, collection, setDoc, deleteDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { db, storage, COLLECTIONS } from './firebase';
+import { db, COLLECTIONS } from './firebase';
 import type { AudioAsset } from '../types';
 
-/** დაშვებული ფორმატები — ბრაუზერების უმეტესობა ყველას უკრავს */
-export const ALLOWED_AUDIO_TYPES = ['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/ogg', 'audio/webm'];
-export const MAX_AUDIO_BYTES = 5 * 1024 * 1024; // 5 მბ — ერთი ფრაზისთვის სავსებით საკმარისია
+export const ALLOWED_AUDIO_TYPES = [
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/mp4',
+  'audio/m4a',
+  'audio/x-m4a',
+  'audio/wav',
+  'audio/x-wav',
+  'audio/ogg',
+  'audio/webm',
+];
+
+/** ნედლი ფაილის ლიმიტი — base64-ის შემდეგ ~533 კბ, დოკუმენტის 1 მბ-ში ეტევა */
+export const MAX_AUDIO_BYTES = 400 * 1024;
 
 export interface AudioUploadResult {
   url: string;
-  storagePath: string;
   durationSeconds?: number;
+  sizeBytes: number;
 }
 
 export function validateAudioFile(file: File): string | null {
-  if (!ALLOWED_AUDIO_TYPES.includes(file.type)) {
+  const typeOk =
+    ALLOWED_AUDIO_TYPES.includes(file.type) || /\.(mp3|m4a|wav|ogg|webm)$/i.test(file.name);
+  if (!typeOk) {
     return 'დაშვებულია მხოლოდ ხმოვანი ფაილი (mp3, m4a, wav, ogg).';
   }
   if (file.size > MAX_AUDIO_BYTES) {
-    return 'ფაილი ძალიან დიდია — მაქსიმუმი 5 მბ.';
+    const kb = Math.round(file.size / 1024);
+    return `ფაილი ძალიან დიდია (${kb} კბ). მაქსიმუმი 400 კბ. შეამცირე ბიტრეიტი 64 kbps-მდე და გადაიყვანე mono — ერთი ფრაზისთვის სავსებით საკმარისია.`;
   }
   return null;
 }
@@ -44,6 +62,15 @@ export function readDuration(file: File): Promise<number | undefined> {
   });
 }
 
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('ფაილის წაკითხვა ვერ მოხერხდა.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function uploadAudio(
   key: string,
   file: File,
@@ -52,37 +79,28 @@ export async function uploadAudio(
   const error = validateAudioFile(file);
   if (error) throw new Error(error);
 
-  const ext = file.name.split('.').pop()?.toLowerCase() ?? 'mp3';
-  const storagePath = `audio/ka/${key}.${ext}`;
-  const fileRef = ref(storage, storagePath);
-
-  await uploadBytes(fileRef, file, { contentType: file.type });
-  const url = await getDownloadURL(fileRef);
+  const dataUrl = await readAsDataUrl(file);
   const durationSeconds = await readDuration(file);
 
+  // data: URI პირდაპირ url ველში — <audio src> მას ისევე უკრავს, როგორც ბმულს
   await setDoc(
     doc(db, COLLECTIONS.audio, key),
     {
       key,
-      url,
-      storagePath,
+      url: dataUrl,
       isCustomUploaded: true,
       uploadedAt: new Date().toISOString(),
       uploadedBy,
+      sizeBytes: file.size,
       ...(durationSeconds ? { durationSeconds } : {}),
     },
     { merge: true },
   );
 
-  return { url, storagePath, ...(durationSeconds ? { durationSeconds } : {}) };
+  return { url: dataUrl, sizeBytes: file.size, ...(durationSeconds ? { durationSeconds } : {}) };
 }
 
-export async function deleteAudio(key: string, storagePath: string): Promise<void> {
-  try {
-    await deleteObject(ref(storage, storagePath));
-  } catch {
-    // ფაილი შესაძლოა უკვე წაშლილია — მეტამონაცემი მაინც უნდა გაიწმინდოს
-  }
+export async function deleteAudio(key: string): Promise<void> {
   await deleteDoc(doc(db, COLLECTIONS.audio, key));
 }
 
@@ -91,7 +109,8 @@ export async function fetchUploadedAudio(): Promise<Record<string, Partial<Audio
   const snap = await getDocs(collection(db, COLLECTIONS.audio));
   const map: Record<string, Partial<AudioAsset>> = {};
   snap.forEach((d) => {
-    map[d.id] = d.data() as Partial<AudioAsset>;
+    const data = d.data() as Partial<AudioAsset>;
+    if (data.url) map[d.id] = data;
   });
   return map;
 }

@@ -35,7 +35,7 @@ import { ExamReportView } from './components/exam/ExamReportView';
 
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { AuthScreen } from './components/auth/AuthScreen';
-import { watchAuth, logoutUser } from './services/auth';
+import { watchAuth, logoutUser, type PendingProfile } from './services/auth';
 import { onCloudChange } from './services/cloudStore';
 import { ensureStudentProfile, getStudentProfileByUserId, setCurrentUser, getCurrentUser } from './services/db';
 
@@ -46,13 +46,16 @@ export function App() {
   const [currentRole, setCurrentRole] = useState<UserRole>(currentUser?.role ?? 'STUDENT');
   // ღრუბლიდან მონაცემის მოსვლისას ინტერფეისი ხელახლა უნდა დაიხატოს
   const [, setCloudTick] = useState(0);
+  // Google-ით შესული, პროფილშეუვსებელი მომხმარებელი
+  const [pendingProfile, setPendingProfile] = useState<PendingProfile | null>(null);
 
   useEffect(() => onCloudChange(() => setCloudTick((t) => t + 1)), []);
 
   useEffect(() => {
-    return watchAuth((user, role) => {
+    return watchAuth((user, role, pending) => {
       setCurrentUserState(user);
       setCurrentUser(user);
+      setPendingProfile(pending);
       if (role) setCurrentRole(role);
       setAuthReady(true);
     });
@@ -148,7 +151,16 @@ export function App() {
   }
 
   if (!currentUser || !studentProfile) {
-    return <AuthScreen onAuthenticated={(u) => { setCurrentUserState(u); setCurrentRole(u.role); }} />;
+    return (
+      <AuthScreen
+        pendingProfile={pendingProfile}
+        onAuthenticated={(u) => {
+          setPendingProfile(null);
+          setCurrentUserState(u);
+          setCurrentRole(u.role);
+        }}
+      />
+    );
   }
 
   return (

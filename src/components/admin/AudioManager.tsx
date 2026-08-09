@@ -90,7 +90,7 @@ export const AudioManager: React.FC<{ adminName: string }> = ({ adminName }) => 
           ? {
               ...a,
               url: res.url,
-              storagePath: res.storagePath,
+              sizeBytes: res.sizeBytes,
               isCustomUploaded: true,
               uploadedAt: new Date().toISOString(),
               uploadedBy: adminName,
@@ -108,13 +108,13 @@ export const AudioManager: React.FC<{ adminName: string }> = ({ adminName }) => 
   }
 
   async function handleDelete(asset: AudioAsset) {
-    if (!asset.storagePath) return;
+    if (!asset.url) return;
     setBusyKey(asset.key);
     try {
-      await deleteAudio(asset.key, asset.storagePath);
+      await deleteAudio(asset.key);
       const next = assets.map((a) =>
         a.key === asset.key
-          ? { ...a, url: undefined, storagePath: undefined, isCustomUploaded: false }
+          ? { ...a, url: undefined, sizeBytes: undefined, isCustomUploaded: false }
           : a,
       );
       setAssets(next);
@@ -146,6 +146,9 @@ export const AudioManager: React.FC<{ adminName: string }> = ({ adminName }) => 
             <p className="text-sm text-indigo-100 max-w-2xl">
               ჩაწერე თითოეული ტექსტი ზუსტად ისე, როგორც წერია, და ატვირთე შესაბამის ველში.
               სანამ ფაილი არ აიტვირთება, სისტემა ბრაუზერის სინთეზურ ხმას იყენებს.
+              <span className="block mt-1 text-indigo-200/80">
+                ფაილის ლიმიტი 400 კბ — mp3, 64 kbps, mono სავსებით საკმარისია.
+              </span>
             </p>
           </div>
           <div className="text-right">
@@ -228,9 +231,11 @@ export const AudioManager: React.FC<{ adminName: string }> = ({ adminName }) => 
                     </div>
                     {/* ზუსტად ეს ტექსტი უნდა ჩაიწეროს */}
                     <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">„{a.textKa}"</p>
-                    {a.durationSeconds && (
+                    {(a.durationSeconds || a.sizeBytes) && (
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        {a.durationSeconds.toFixed(1)} წმ
+                        {a.durationSeconds ? `${a.durationSeconds.toFixed(1)} წმ` : ''}
+                        {a.durationSeconds && a.sizeBytes ? ' · ' : ''}
+                        {a.sizeBytes ? `${Math.round(a.sizeBytes / 1024)} კბ` : ''}
                       </p>
                     )}
                   </div>

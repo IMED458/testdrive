@@ -294,10 +294,10 @@ export interface AudioAsset {
   titleKa: string;
   /** ზუსტად ეს ტექსტი უნდა ჩაიწეროს ხმაში */
   textKa: string;
-  /** Firebase Storage-ის ბმული ატვირთვის შემდეგ */
+  /** ატვირთული ჩანაწერი — base64 data: URI (Firestore-ში ინახება) */
   url?: string;
   isCustomUploaded?: boolean;
-  storagePath?: string;
+  sizeBytes?: number;
   uploadedAt?: string;
   uploadedBy?: string;
   durationSeconds?: number;

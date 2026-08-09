@@ -99,21 +99,22 @@ export async function loginUser(email: string, password: string): Promise<User> 
   return profile;
 }
 
+/** Google-ით შესვლის შედეგი: ან მზა პროფილი, ან პროფილის შევსების მოთხოვნა */
+export type GoogleSignInResult =
+  | { status: 'EXISTING'; user: User }
+  | {
+      status: 'NEEDS_PROFILE';
+      prefill: { firstName: string; lastName: string; email: string; phone?: string };
+    };
+
 /**
  * Google-ით შესვლა.
  *
- * პირველ ჯერზე იქმნება users დოკუმენტი არჩეული როლით.
- * თუ ანგარიში უკვე არსებობს, არსებული როლი და პარამეტრები რჩება —
- * Google-ით შესვლამ არსებული პროფილი არ უნდა გადააწეროს.
+ * პირველ ჯერზე პროფილი ავტომატურად არ იქმნება — მომხმარებელს ჯერ
+ * მოეთხოვება როლი, ქალაქი, კატეგორია და ტრანსმისია (completeGoogleProfile).
+ * მეორე შესვლაზე არსებული პროფილი ბრუნდება და კითხვები აღარ ისმება.
  */
-export async function signInWithGoogle(
-  defaults: {
-    role?: 'STUDENT' | 'INSTRUCTOR';
-    preferredCity?: string;
-    category?: DrivingCategory;
-    transmission?: TransmissionType;
-  } = {},
-): Promise<User> {
+export async function signInWithGoogle(): Promise<GoogleSignInResult> {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
 
@@ -132,27 +133,54 @@ export async function signInWithGoogle(
 
   const snap = await getDoc(doc(firestore, COLLECTIONS.users, cred.user.uid));
   if (snap.exists()) {
+    // მეორე და შემდეგი შესვლა — პროფილი დამახსოვრებულია
     const existing = snap.data() as User;
     await hydrate(cred.user.uid);
-    return existing;
+    return { status: 'EXISTING', user: existing };
   }
 
+  // პირველი შესვლა — Google-იდან ვიღებთ მხოლოდ სახელს/ფოსტას,
+  // დანარჩენს მომხმარებელი თავად ავსებს
   const [first = '', ...rest] = (cred.user.displayName ?? '').split(' ');
+  return {
+    status: 'NEEDS_PROFILE',
+    prefill: {
+      firstName: first,
+      lastName: rest.join(' '),
+      email: cred.user.email ?? '',
+      phone: cred.user.phoneNumber ?? undefined,
+    },
+  };
+}
+
+/** Google-ით პირველი შესვლის შემდეგ პროფილის დასრულება */
+export async function completeGoogleProfile(input: {
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  preferredCity: string;
+  category: DrivingCategory;
+  transmission: TransmissionType;
+  role: 'STUDENT' | 'INSTRUCTOR';
+}): Promise<User> {
+  const fbUser = auth.currentUser;
+  if (!fbUser) throw new Error('სესია არ მოიძებნა. სცადე ხელახლა შესვლა.');
+
   const profile: User = {
-    id: cred.user.uid,
-    firstName: first || 'მომხმარებელი',
-    lastName: rest.join(' '),
-    email: cred.user.email ?? '',
-    phone: cred.user.phoneNumber ?? undefined,
-    role: defaults.role ?? 'STUDENT',
-    preferredCity: defaults.preferredCity ?? 'Telavi',
-    category: defaults.category ?? 'B',
-    transmission: defaults.transmission ?? 'MANUAL',
+    id: fbUser.uid,
+    firstName: input.firstName.trim(),
+    lastName: input.lastName.trim(),
+    email: fbUser.email ?? '',
+    phone: input.phone?.trim() || undefined,
+    role: input.role,
+    preferredCity: input.preferredCity,
+    category: input.category,
+    transmission: input.transmission,
     createdAt: new Date().toISOString(),
   };
 
-  await setDoc(doc(firestore, COLLECTIONS.users, cred.user.uid), profile);
-  await hydrate(cred.user.uid);
+  await setDoc(doc(firestore, COLLECTIONS.users, fbUser.uid), profile);
+  await hydrate(fbUser.uid);
   return profile;
 }
 
@@ -162,42 +190,51 @@ export async function logoutUser(): Promise<void> {
 }
 
 /**
- * Firestore-ის პროფილი; თუ არ არსებობს (მაგ. ანგარიში კონსოლიდან შეიქმნა),
- * იქმნება მინიმალური ჩანაწერი STUDENT როლით.
+ * Firestore-ის პროფილი. თუ არ არსებობს — null.
+ *
+ * განზრახ არ იქმნება ავტომატური ჩანაწერი: Google-ით პირველ შესვლაზე
+ * მომხმარებელმა თავად უნდა აირჩიოს როლი, კატეგორია და ტრანსმისია.
  */
-async function fetchUserProfile(fbUser: FirebaseUser): Promise<User> {
+async function fetchUserProfile(fbUser: FirebaseUser): Promise<User | null> {
   const snap = await getDoc(doc(firestore, COLLECTIONS.users, fbUser.uid));
-  if (snap.exists()) return snap.data() as User;
-
-  const [first = '', last = ''] = (fbUser.displayName ?? '').split(' ');
-  const fallback: User = {
-    id: fbUser.uid,
-    firstName: first || 'მომხმარებელი',
-    lastName: last,
-    email: fbUser.email ?? '',
-    role: 'STUDENT',
-    preferredCity: 'Telavi',
-    category: 'B',
-    transmission: 'MANUAL',
-    createdAt: new Date().toISOString(),
-  };
-  await setDoc(doc(firestore, COLLECTIONS.users, fbUser.uid), fallback);
-  return fallback;
+  return snap.exists() ? (snap.data() as User) : null;
 }
 
-/** ავტორიზაციის მდგომარეობის თვალყური — გვერდის გადატვირთვისას სესია რჩება */
-export function watchAuth(cb: (user: User | null, role: UserRole | null) => void): () => void {
+export interface PendingProfile {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+}
+
+/**
+ * ავტორიზაციის მდგომარეობის თვალყური — გვერდის გადატვირთვისას სესია რჩება.
+ * pending ივსება, როცა Firebase-ში ანგარიშია, პროფილი კი ჯერ არა.
+ */
+export function watchAuth(
+  cb: (user: User | null, role: UserRole | null, pending: PendingProfile | null) => void,
+): () => void {
   return onAuthStateChanged(auth, async (fbUser) => {
     if (!fbUser) {
-      cb(null, null);
+      cb(null, null, null);
       return;
     }
     try {
       const profile = await fetchUserProfile(fbUser);
+      if (!profile) {
+        const [first = '', ...rest] = (fbUser.displayName ?? '').split(' ');
+        cb(null, null, {
+          firstName: first,
+          lastName: rest.join(' '),
+          email: fbUser.email ?? '',
+          phone: fbUser.phoneNumber ?? undefined,
+        });
+        return;
+      }
       await hydrate(fbUser.uid);
-      cb(profile, profile.role);
+      cb(profile, profile.role, null);
     } catch {
-      cb(null, null);
+      cb(null, null, null);
     }
   });
 }

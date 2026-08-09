@@ -1,21 +1,22 @@
 /**
- * Firebase — ავთენტიფიკაცია, Firestore, Storage (ხმოვანი ფაილები).
+ * Firebase — ავთენტიფიკაცია და Firestore.
+ *
+ * Firebase Storage განზრახ არ გამოიყენება: ის Blaze (ფასიან) გეგმას მოითხოვს.
+ * ხმოვანი ფაილები ინახება Firestore-ში base64-ად (იხ. services/audioStorage.ts).
  *
  * ⚠ ეს კონფიგურაცია საჯაროა და ასეც უნდა იყოს — ვებ-აპლიკაციის Firebase კონფიგი
  *   საიდუმლო არ არის. ნამდვილი დაცვა ხდება Firestore/Storage Security Rules-ით
- *   (იხ. firestore.rules და storage.rules). apiKey-ს გაჟონვა თავისთავად რისკი არ არის,
+ *   (იხ. firestore.rules). apiKey-ს გაჟონვა თავისთავად რისკი არ არის,
  *   მაგრამ სუსტი წესები არის — ამიტომ წესები აუცილებლად უნდა განთავსდეს.
  */
 import { initializeApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
-import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBSxtvdCH8rPO48f11HMbW6NQe1ZZ-z4lo',
   authDomain: 'testdrive-de93a.firebaseapp.com',
   projectId: 'testdrive-de93a',
-  storageBucket: 'testdrive-de93a.firebasestorage.app',
   messagingSenderId: '691502195095',
   appId: '1:691502195095:web:bb8f220a2c0525305e64d2',
   measurementId: 'G-MSZ3WGTCS2',
@@ -24,7 +25,6 @@ const firebaseConfig = {
 export const app: FirebaseApp = initializeApp(firebaseConfig);
 export const auth: Auth = getAuth(app);
 export const db: Firestore = getFirestore(app);
-export const storage: FirebaseStorage = getStorage(app);
 
 /** Analytics ცალკე იტვირთება — ბლოკერების დროს აპლიკაცია არ უნდა ჩავარდეს */
 export async function initAnalytics(): Promise<void> {

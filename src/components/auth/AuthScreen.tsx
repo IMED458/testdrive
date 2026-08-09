@@ -1,6 +1,13 @@
 import React, { useState } from 'react';
 import { Car, Mail, Lock, User as UserIcon, Phone, ShieldAlert, GraduationCap } from 'lucide-react';
-import { loginUser, registerUser, signInWithGoogle, translateAuthError } from '../../services/auth';
+import {
+  completeGoogleProfile,
+  loginUser,
+  registerUser,
+  signInWithGoogle,
+  translateAuthError,
+  type PendingProfile,
+} from '../../services/auth';
 import { GoogleIcon } from './GoogleIcon';
 import type { DrivingCategory, TransmissionType, User } from '../../types';
 
@@ -14,10 +21,14 @@ const CITY_LABELS: Record<string, string> = {
 };
 
 /** შესვლა და რეგისტრაცია — Firebase Authentication */
-export const AuthScreen: React.FC<{ onAuthenticated: (u: User) => void }> = ({
-  onAuthenticated,
-}) => {
+export const AuthScreen: React.FC<{
+  onAuthenticated: (u: User) => void;
+  /** Google-ით შესული, მაგრამ პროფილშეუვსებელი მომხმარებელი */
+  pendingProfile?: PendingProfile | null;
+}> = ({ onAuthenticated, pendingProfile }) => {
   const [mode, setMode] = useState<'LOGIN' | 'REGISTER'>('LOGIN');
+  // Google-ის პირველი შესვლა — პროფილის შევსების ეკრანი
+  const [pending, setPending] = useState<PendingProfile | null>(pendingProfile ?? null);
   const [role, setRole] = useState<'STUDENT' | 'INSTRUCTOR'>('STUDENT');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,13 +93,17 @@ export const AuthScreen: React.FC<{ onAuthenticated: (u: User) => void }> = ({
     setError(null);
     setBusy(true);
     try {
-      // რეგისტრაციის რეჟიმში არჩეული პარამეტრები ახალ ანგარიშს გადაეცემა
-      const user = await signInWithGoogle(
-        mode === 'REGISTER'
-          ? { role, preferredCity: city, category, transmission }
-          : {},
-      );
-      onAuthenticated(user);
+      const res = await signInWithGoogle();
+      if (res.status === 'EXISTING') {
+        // მეორე შესვლა — პარამეტრები დამახსოვრებულია, კითხვები აღარ ისმება
+        onAuthenticated(res.user);
+        return;
+      }
+      // პირველი შესვლა — საჭირო ველები უნდა შეივსოს
+      setFirstName(res.prefill.firstName);
+      setLastName(res.prefill.lastName);
+      setPhone(res.prefill.phone ?? '');
+      setPending(res.prefill);
     } catch (err) {
       const code = (err as { code?: string })?.code ?? '';
       console.error('[auth:google]', code, (err as Error)?.message);
@@ -98,8 +113,169 @@ export const AuthScreen: React.FC<{ onAuthenticated: (u: User) => void }> = ({
     }
   }
 
+  async function handleCompleteProfile(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!firstName.trim() || !lastName.trim()) {
+      setError('სახელი და გვარი სავალდებულოა.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const user = await completeGoogleProfile({
+        firstName,
+        lastName,
+        phone,
+        preferredCity: city,
+        category,
+        transmission,
+        role,
+      });
+      onAuthenticated(user);
+    } catch (err) {
+      const code = (err as { code?: string })?.code ?? '';
+      console.error('[auth:complete]', code, (err as Error)?.message);
+      setError(translateAuthError(code));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const field =
     'w-full pl-10 pr-3 py-3 rounded-xl bg-slate-800/60 border border-slate-700 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
+  // ── Google-ით პირველი შესვლა: პროფილის შევსება ──
+  if (pending) {
+    return (
+      <div className="min-h-dvh bg-slate-950 flex flex-col items-center justify-center px-4 py-10">
+        <div className="w-full max-w-md space-y-5">
+          <div className="text-center space-y-2">
+            <div className="w-14 h-14 rounded-2xl bg-indigo-600 flex items-center justify-center mx-auto">
+              <Car className="w-7 h-7 text-white" />
+            </div>
+            <h1 className="text-2xl font-extrabold text-white">დაასრულე რეგისტრაცია</h1>
+            <p className="text-sm text-slate-400">
+              {pending.email} — ერთხელ შეავსე, შემდეგ შესვლაზე აღარ მოგთხოვს.
+            </p>
+          </div>
+
+          <form
+            onSubmit={handleCompleteProfile}
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3"
+            noValidate
+          >
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  { v: 'STUDENT', label: 'მოსწავლე', Icon: GraduationCap },
+                  { v: 'INSTRUCTOR', label: 'ინსტრუქტორი', Icon: Car },
+                ] as const
+              ).map(({ v, label, Icon }) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setRole(v)}
+                  aria-pressed={role === v}
+                  className={`flex items-center justify-center gap-2 py-3 rounded-xl border text-sm font-bold transition-all ${
+                    role === v
+                      ? 'bg-indigo-600 border-indigo-500 text-white'
+                      : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="relative">
+                <UserIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  className={field}
+                  placeholder="სახელი"
+                  aria-label="სახელი"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                />
+              </div>
+              <div className="relative">
+                <UserIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  className={field}
+                  placeholder="გვარი"
+                  aria-label="გვარი"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="relative">
+              <Phone className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                className={field}
+                placeholder="ტელეფონი (არასავალდებულო)"
+                aria-label="ტელეფონი"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </div>
+
+            <select
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              aria-label="ქალაქი"
+              className="w-full px-3 py-3 rounded-xl bg-slate-800/60 border border-slate-700 text-white text-sm"
+            >
+              {CITIES.map((c) => (
+                <option key={c} value={c}>
+                  {CITY_LABELS[c]}
+                </option>
+              ))}
+            </select>
+
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value as DrivingCategory)}
+                aria-label="კატეგორია"
+                className="w-full px-3 py-3 rounded-xl bg-slate-800/60 border border-slate-700 text-white text-sm"
+              >
+                <option value="B">B კატეგორია</option>
+                <option value="BE">BE კატეგორია</option>
+              </select>
+              <select
+                value={transmission}
+                onChange={(e) => setTransmission(e.target.value as TransmissionType)}
+                aria-label="ტრანსმისია"
+                className="w-full px-3 py-3 rounded-xl bg-slate-800/60 border border-slate-700 text-white text-sm"
+              >
+                <option value="MANUAL">მექანიკა</option>
+                <option value="AUTOMATIC">ავტომატიკა</option>
+              </select>
+            </div>
+
+            {error && (
+              <div className="flex items-start gap-2 bg-rose-950/50 border border-rose-900 text-rose-200 rounded-xl p-3 text-sm">
+                <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                <p>{error}</p>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold text-sm transition-all active:scale-[0.99]"
+            >
+              {busy ? 'ინახება…' : 'დასრულება'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-dvh bg-slate-950 flex flex-col items-center justify-center px-4 py-10">

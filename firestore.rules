@@ -89,7 +89,14 @@ service cloud.firestore {
     match /routeVersions/{id}      { allow read: if true; allow write: if isAdmin(); }
     match /ruleSets/{id}           { allow read: if true; allow write: if isAdmin(); }
     match /technicalQuestions/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /audioAssets/{id}        { allow read: if true; allow write: if isAdmin(); }
+    // ხმოვანი ფაილები base64-ად ინახება აქვე (Storage ფასიანია).
+    // 700 კბ ლიმიტი იცავს დოკუმენტის 1 მბ-იან ზღვარს.
+    match /audioAssets/{id} {
+      allow read: if true;
+      allow write: if isAdmin()
+                   && (!('url' in request.resource.data)
+                       || request.resource.data.url.size() < 700 * 1024);
+    }
     match /roadWarnings/{id}       { allow read: if true; allow write: if isAdmin(); }
 
     // აუდიტის ჟურნალი — მხოლოდ დამატება, რედაქტირება/წაშლა აკრძალულია.
