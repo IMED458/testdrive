@@ -25,8 +25,9 @@ service cloud.firestore {
     // როლს თავად ვერ იცვლის — თორემ ნებისმიერს ADMIN გახდომა შეეძლებოდა.
     match /users/{uid} {
       allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin() || isInstructor());
+      // რეგისტრაციისას დასაშვებია STUDENT ან INSTRUCTOR — ADMIN მხოლოდ ხელით ენიჭება
       allow create: if isSignedIn() && request.auth.uid == uid
-                    && request.resource.data.role == 'STUDENT';
+                    && request.resource.data.role in ['STUDENT', 'INSTRUCTOR'];
       allow update: if isSignedIn() && request.auth.uid == uid
                     && request.resource.data.role == resource.data.role;
       allow write: if isAdmin();

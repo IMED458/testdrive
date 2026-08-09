@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Car, Mail, Lock, User as UserIcon, Phone, ShieldAlert, GraduationCap } from 'lucide-react';
-import { loginUser, registerUser, translateAuthError } from '../../services/auth';
+import { loginUser, registerUser, signInWithGoogle, translateAuthError } from '../../services/auth';
+import { GoogleIcon } from './GoogleIcon';
 import type { DrivingCategory, TransmissionType, User } from '../../types';
 
 const CITIES = ['Telavi', 'Rustavi', 'Tbilisi', 'Kutaisi', 'Batumi'];
@@ -77,6 +78,26 @@ export const AuthScreen: React.FC<{ onAuthenticated: (u: User) => void }> = ({
     }
   }
 
+  async function handleGoogle() {
+    setError(null);
+    setBusy(true);
+    try {
+      // რეგისტრაციის რეჟიმში არჩეული პარამეტრები ახალ ანგარიშს გადაეცემა
+      const user = await signInWithGoogle(
+        mode === 'REGISTER'
+          ? { role, preferredCity: city, category, transmission }
+          : {},
+      );
+      onAuthenticated(user);
+    } catch (err) {
+      const code = (err as { code?: string })?.code ?? '';
+      console.error('[auth:google]', code, (err as Error)?.message);
+      setError(translateAuthError(code));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const field =
     'w-full pl-10 pr-3 py-3 rounded-xl bg-slate-800/60 border border-slate-700 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
@@ -111,6 +132,23 @@ export const AuthScreen: React.FC<{ onAuthenticated: (u: User) => void }> = ({
                 {m === 'LOGIN' ? 'შესვლა' : 'რეგისტრაცია'}
               </button>
             ))}
+          </div>
+
+          {/* Google-ით შესვლა */}
+          <button
+            type="button"
+            onClick={handleGoogle}
+            disabled={busy}
+            className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl bg-white hover:bg-slate-100 disabled:opacity-50 text-slate-800 font-bold text-sm transition-all active:scale-[0.99] border border-slate-300"
+          >
+            <GoogleIcon />
+            Google-ით გაგრძელება
+          </button>
+
+          <div className="flex items-center gap-3">
+            <span className="flex-1 h-px bg-slate-800" />
+            <span className="text-xs text-slate-500">ან ელ. ფოსტით</span>
+            <span className="flex-1 h-px bg-slate-800" />
           </div>
 
           <form onSubmit={submit} className="space-y-3" noValidate>
