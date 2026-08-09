@@ -64,20 +64,31 @@ export const AuthScreen: React.FC<{
 
     setBusy(true);
     try {
-      const user =
-        mode === 'LOGIN'
-          ? await loginUser(email, password)
-          : await registerUser({
-              firstName,
-              lastName,
-              email,
-              password,
-              phone,
-              preferredCity: city,
-              category,
-              transmission,
-              role,
-            });
+      if (mode === 'LOGIN') {
+        const res = await loginUser(email, password);
+        if (res.status === 'EXISTING') {
+          onAuthenticated(res.user);
+        } else {
+          // ანგარიში არსებობს, პროფილი კი არა — შევსება მოეთხოვება
+          setFirstName(res.prefill.firstName);
+          setLastName(res.prefill.lastName);
+          setPhone(res.prefill.phone ?? '');
+          setPending(res.prefill);
+        }
+        return;
+      }
+
+      const user = await registerUser({
+        firstName,
+        lastName,
+        email,
+        password,
+        phone,
+        preferredCity: city,
+        category,
+        transmission,
+        role,
+      });
       onAuthenticated(user);
     } catch (err) {
       const code = (err as { code?: string })?.code ?? '';

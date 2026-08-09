@@ -19,6 +19,7 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db as firestore, COLLECTIONS } from './firebase';
 import { clearUserScopedCache, hydrate } from './cloudStore';
+import { isBootstrapAdminEmail } from '../config/admins';
 import type { DrivingCategory, TransmissionType, User, UserRole } from '../types';
 
 export interface RegisterInput {
@@ -63,6 +64,14 @@ export function translateAuthError(code: string): string {
   return map[code] ?? 'დაფიქსირდა შეცდომა. სცადე ხელახლა.';
 }
 
+/** Google-ით შესვლის შედეგი: ან მზა პროფილი, ან პროფილის შევსების მოთხოვნა */
+export type GoogleSignInResult =
+  | { status: 'EXISTING'; user: User }
+  | {
+      status: 'NEEDS_PROFILE';
+      prefill: { firstName: string; lastName: string; email: string; phone?: string };
+    };
+
 export async function registerUser(input: RegisterInput): Promise<User> {
   const cred = await createUserWithEmailAndPassword(
     auth,
@@ -80,7 +89,8 @@ export async function registerUser(input: RegisterInput): Promise<User> {
     lastName: input.lastName.trim(),
     email: input.email.trim(),
     phone: input.phone?.trim() || undefined,
-    role: input.role,
+    // საწყისი ადმინის ფოსტა ავტომატურად ADMIN-ია (იხ. config/admins.ts)
+    role: isBootstrapAdminEmail(input.email) ? 'ADMIN' : input.role,
     preferredCity: input.preferredCity,
     category: input.category,
     transmission: input.transmission,
@@ -92,20 +102,33 @@ export async function registerUser(input: RegisterInput): Promise<User> {
   return profile;
 }
 
-export async function loginUser(email: string, password: string): Promise<User> {
+/**
+ * ელ. ფოსტით შესვლა.
+ *
+ * პროფილი შეიძლება არ არსებობდეს (მაგ. ანგარიში კონსოლიდან შეიქმნა, ან
+ * რეგისტრაციისას Firestore-ში ჩაწერა ჩავარდა) — ასეთ შემთხვევაში
+ * ბრუნდება NEEDS_PROFILE და მომხმარებელი პროფილს ავსებს.
+ */
+export async function loginUser(email: string, password: string): Promise<GoogleSignInResult> {
   const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
   const profile = await fetchUserProfile(cred.user);
-  await hydrate(cred.user.uid);
-  return profile;
-}
 
-/** Google-ით შესვლის შედეგი: ან მზა პროფილი, ან პროფილის შევსების მოთხოვნა */
-export type GoogleSignInResult =
-  | { status: 'EXISTING'; user: User }
-  | {
-      status: 'NEEDS_PROFILE';
-      prefill: { firstName: string; lastName: string; email: string; phone?: string };
+  if (!profile) {
+    const [first = '', ...rest] = (cred.user.displayName ?? '').split(' ');
+    return {
+      status: 'NEEDS_PROFILE',
+      prefill: {
+        firstName: first,
+        lastName: rest.join(' '),
+        email: cred.user.email ?? '',
+        phone: cred.user.phoneNumber ?? undefined,
+      },
     };
+  }
+
+  await hydrate(cred.user.uid);
+  return { status: 'EXISTING', user: profile };
+}
 
 /**
  * Google-ით შესვლა.
@@ -172,7 +195,7 @@ export async function completeGoogleProfile(input: {
     lastName: input.lastName.trim(),
     email: fbUser.email ?? '',
     phone: input.phone?.trim() || undefined,
-    role: input.role,
+    role: isBootstrapAdminEmail(fbUser.email) ? 'ADMIN' : input.role,
     preferredCity: input.preferredCity,
     category: input.category,
     transmission: input.transmission,
@@ -197,7 +220,21 @@ export async function logoutUser(): Promise<void> {
  */
 async function fetchUserProfile(fbUser: FirebaseUser): Promise<User | null> {
   const snap = await getDoc(doc(firestore, COLLECTIONS.users, fbUser.uid));
-  return snap.exists() ? (snap.data() as User) : null;
+  if (!snap.exists()) return null;
+
+  const profile = snap.data() as User;
+
+  // საწყისი ადმინი — თუ ჩანაწერი ჯერ ADMIN არ არის, ავწევთ და შევინახავთ
+  if (isBootstrapAdminEmail(fbUser.email) && profile.role !== 'ADMIN' && profile.role !== 'SUPER_ADMIN') {
+    const upgraded: User = { ...profile, role: 'ADMIN' };
+    try {
+      await setDoc(doc(firestore, COLLECTIONS.users, fbUser.uid), upgraded, { merge: true });
+    } catch {
+      // ჩაწერა ვერ მოხერხდა — როლი მაინც მოქმედებს ამ სესიაზე
+    }
+    return upgraded;
+  }
+  return profile;
 }
 
 export interface PendingProfile {

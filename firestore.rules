@@ -13,8 +13,16 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
+    // საწყისი ადმინი — ხსნის „კვერცხი თუ ქათამი" პრობლემას:
+    // ADMIN როლის ჩაწერა თავად ადმინობას მოითხოვდა.
+    // უნდა ემთხვეოდეს src/config/admins.ts-ს.
+    function isBootstrapAdmin() {
+      return isSignedIn() && request.auth.token.email == 'gimedashvili7@gmail.com';
+    }
+
     function isAdmin() {
-      return isSignedIn() && (role() == 'ADMIN' || role() == 'SUPER_ADMIN');
+      return isBootstrapAdmin() ||
+             (isSignedIn() && (role() == 'ADMIN' || role() == 'SUPER_ADMIN'));
     }
 
     function isInstructor() {
@@ -27,9 +35,12 @@ service cloud.firestore {
       allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin() || isInstructor());
       // რეგისტრაციისას დასაშვებია STUDENT ან INSTRUCTOR — ADMIN მხოლოდ ხელით ენიჭება
       allow create: if isSignedIn() && request.auth.uid == uid
-                    && request.resource.data.role in ['STUDENT', 'INSTRUCTOR'];
+                    && (request.resource.data.role in ['STUDENT', 'INSTRUCTOR']
+                        || isBootstrapAdmin());
+      // როლს თავად ვერ იცვლის — გამონაკლისი მხოლოდ საწყისი ადმინია
       allow update: if isSignedIn() && request.auth.uid == uid
-                    && request.resource.data.role == resource.data.role;
+                    && (request.resource.data.role == resource.data.role
+                        || isBootstrapAdmin());
       allow write: if isAdmin();
     }
 
