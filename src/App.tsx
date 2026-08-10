@@ -114,6 +114,8 @@ export function App() {
 
   // Handle Pre-check finished and driving started
   const handlePreCheckComplete = (selectedRoute: RouteVersion) => {
+    // ავტორიზაციის კარიბჭე ამას ვერ დაუშვებს, მაგრამ ტიპი ღიად უნდა დაიხუროს
+    if (!currentUser) return;
     const ruleSet = getRuleSet();
     const engine = new ExamEngine(
       currentUser.id,
@@ -168,6 +170,7 @@ export function App() {
       {/* Header Navigation */}
       <Header
         currentUser={currentUser}
+        viewRole={currentRole}
         onLogout={() => { void logoutUser(); }}
         onRoleChange={(role) => {
           // როლს ცვლის მხოლოდ ადმინი — სხვისთვის როლი Firestore-იდან მოდის

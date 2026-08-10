@@ -31,8 +31,13 @@ export const ExamPreCheck: React.FC<ExamPreCheckProps> = ({
 
   // Technical Questions
   const allQuestions = getTechnicalQuestions();
-  const [quizQuestions] = useState<TechnicalQuestion[]>(allQuestions.slice(0, 2));
-  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>({});
+  // გამოცდაზე შემთხვევით ირჩევა 2 კითხვა — არა ყოველთვის პირველი ორი
+  const [quizQuestions] = useState<TechnicalQuestion[]>(() =>
+    [...allQuestions].sort(() => Math.random() - 0.5).slice(0, 2),
+  );
+  /** ოფიციალური კითხვები ზეპირია: მოსწავლე პასუხობს, შემდეგ თავად აფასებს */
+  const [selfAssessment, setSelfAssessment] = useState<Record<string, boolean>>({});
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [quizAnswered, setQuizAnswered] = useState(false);
 
   // Audio test
@@ -43,8 +48,8 @@ export const ExamPreCheck: React.FC<ExamPreCheckProps> = ({
     setAudioTested(true);
   };
 
-  const handleSelectAnswer = (qId: string, optionIdx: number) => {
-    setSelectedAnswers({ ...selectedAnswers, [qId]: optionIdx });
+  const handleSelfAssess = (qId: string, correct: boolean) => {
+    setSelfAssessment((prev) => ({ ...prev, [qId]: correct }));
   };
 
   const handleConfirmQuiz = () => {
@@ -55,7 +60,7 @@ export const ExamPreCheck: React.FC<ExamPreCheckProps> = ({
   const handleFinalStart = () => {
     const techAnswers = quizQuestions.map((q) => ({
       questionId: q.id,
-      isCorrect: selectedAnswers[q.id] === q.correctOptionIndex,
+      isCorrect: selfAssessment[q.id] === true,
     }));
     onStartDriving(selectedRoute, techAnswers);
   };
@@ -233,35 +238,83 @@ export const ExamPreCheck: React.FC<ExamPreCheckProps> = ({
       {step === 'TECH' && (
         <div className="space-y-5">
           <div className="space-y-4">
-            {quizQuestions.map((q, qIdx) => (
-              <div
-                key={q.id}
-                className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3"
-              >
-                <p className="text-xs font-bold text-slate-900 dark:text-white">
-                  კითხვა #{qIdx + 1}: {q.questionKa}
-                </p>
-                <div className="space-y-2">
-                  {q.optionsKa.map((opt, optIdx) => {
-                    const isSelected = selectedAnswers[q.id] === optIdx;
-                    return (
-                      <button
-                        key={optIdx}
-                        type="button"
-                        onClick={() => handleSelectAnswer(q.id, optIdx)}
-                        className={`w-full text-left p-3 rounded-xl text-xs font-medium border transition-all ${
-                          isSelected
-                            ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
-                            : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:border-slate-300'
-                        }`}
-                      >
-                        {opt}
-                      </button>
-                    );
-                  })}
+            {quizQuestions.map((q, qIdx) => {
+              const isRevealed = revealed[q.id];
+              const assessed = selfAssessment[q.id];
+              return (
+                <div
+                  key={q.id}
+                  className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-bold text-slate-900 dark:text-white">
+                      კითხვა #{qIdx + 1}: {q.questionKa}
+                    </p>
+                    <span className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                      {q.responseMode === 'DEMONSTRATION'
+                        ? 'ჩვენება'
+                        : q.responseMode === 'VERBAL'
+                          ? 'ზეპირი'
+                          : 'ზეპირი ან ჩვენება'}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    უპასუხე ხმამაღლა ან აჩვენე ავტომობილზე, შემდეგ შეადარე სწორ პასუხს.
+                  </p>
+
+                  {!isRevealed ? (
+                    <button
+                      type="button"
+                      onClick={() => setRevealed((prev) => ({ ...prev, [q.id]: true }))}
+                      className="w-full py-3 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-indigo-600 dark:text-indigo-400 hover:border-indigo-400"
+                    >
+                      სწორი პასუხის ნახვა
+                    </button>
+                  ) : (
+                    <>
+                      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <p className="text-[11px] font-bold text-slate-500 mb-1">სწორი პასუხი</p>
+                        <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                          {q.answerKa}
+                        </p>
+                      </div>
+
+                      {/* თვითშეფასება — შედეგზე ისევე მოქმედებს, როგორც რეალურ გამოცდაზე */}
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-bold text-slate-500">სწორად უპასუხე?</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSelfAssess(q.id, true)}
+                            aria-pressed={assessed === true}
+                            className={`py-3 rounded-xl text-xs font-bold border transition-all ${
+                              assessed === true
+                                ? 'bg-emerald-500 border-emerald-500 text-white'
+                                : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-emerald-400'
+                            }`}
+                          >
+                            ✓ კი
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSelfAssess(q.id, false)}
+                            aria-pressed={assessed === false}
+                            className={`py-3 rounded-xl text-xs font-bold border transition-all ${
+                              assessed === false
+                                ? 'bg-rose-500 border-rose-500 text-white'
+                                : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-rose-400'
+                            }`}
+                          >
+                            ✕ არა
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="pt-2 flex justify-between items-center">
@@ -270,9 +323,9 @@ export const ExamPreCheck: React.FC<ExamPreCheckProps> = ({
             </button>
             <button
               onClick={handleConfirmQuiz}
-              disabled={Object.keys(selectedAnswers).length < quizQuestions.length}
+              disabled={Object.keys(selfAssessment).length < quizQuestions.length}
               className={`font-bold text-xs px-6 py-3 rounded-xl transition-all shadow-md ${
-                Object.keys(selectedAnswers).length >= quizQuestions.length
+                Object.keys(selfAssessment).length >= quizQuestions.length
                   ? 'bg-indigo-600 text-white hover:bg-indigo-700'
                   : 'bg-slate-200 text-slate-400 cursor-not-allowed'
               }`}

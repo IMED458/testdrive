@@ -82,20 +82,29 @@ export async function uploadAudio(
   const dataUrl = await readAsDataUrl(file);
   const durationSeconds = await readDuration(file);
 
-  // data: URI პირდაპირ url ველში — <audio src> მას ისევე უკრავს, როგორც ბმულს
-  await setDoc(
-    doc(db, COLLECTIONS.audio, key),
-    {
-      key,
-      url: dataUrl,
-      isCustomUploaded: true,
-      uploadedAt: new Date().toISOString(),
-      uploadedBy,
-      sizeBytes: file.size,
-      ...(durationSeconds ? { durationSeconds } : {}),
-    },
-    { merge: true },
-  );
+  try {
+    // data: URI პირდაპირ url ველში — <audio src> მას ისევე უკრავს, როგორც ბმულს
+    await setDoc(
+      doc(db, COLLECTIONS.audio, key),
+      {
+        key,
+        url: dataUrl,
+        isCustomUploaded: true,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy,
+        sizeBytes: file.size,
+        ...(durationSeconds ? { durationSeconds } : {}),
+      },
+      { merge: true },
+    );
+  } catch (err) {
+    if ((err as { code?: string })?.code === 'permission-denied') {
+      throw new Error(
+        'ბაზამ ჩაწერა უარყო. საჭიროა: (1) ADMIN როლი და (2) firestore.rules-ის განახლებული ვერსია კონსოლში.',
+      );
+    }
+    throw err;
+  }
 
   return { url: dataUrl, sizeBytes: file.size, ...(durationSeconds ? { durationSeconds } : {}) };
 }

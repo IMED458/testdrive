@@ -7,6 +7,8 @@ interface HeaderProps {
   onRoleChange: (role: UserRole) => void;
   onOpenDisclaimer: () => void;
   onLogout?: () => void;
+  /** ამჟამად ნანახი როლი — გადამრთველის ხაზგასმა ამას ეყრდნობა, არა ანგარიშის როლს */
+  viewRole?: UserRole;
   activeCity: string;
   onCityChange: (city: string) => void;
 }
@@ -16,6 +18,7 @@ export const Header: React.FC<HeaderProps> = ({
   onRoleChange,
   onOpenDisclaimer,
   onLogout,
+  viewRole,
   activeCity,
   onCityChange,
 }) => {
@@ -64,7 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={() => onRoleChange('STUDENT')}
               className={`px-2.5 py-1 rounded-md transition-all ${
-                currentUser.role === 'STUDENT'
+                (viewRole ?? currentUser.role) === 'STUDENT'
                   ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
               }`}
@@ -74,7 +77,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={() => onRoleChange('INSTRUCTOR')}
               className={`px-2.5 py-1 rounded-md transition-all ${
-                currentUser.role === 'INSTRUCTOR'
+                (viewRole ?? currentUser.role) === 'INSTRUCTOR'
                   ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
               }`}
@@ -84,7 +87,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={() => onRoleChange('ADMIN')}
               className={`px-2.5 py-1 rounded-md transition-all hidden md:block ${
-                currentUser.role === 'ADMIN'
+                (viewRole ?? currentUser.role) === 'ADMIN'
                   ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
               }`}

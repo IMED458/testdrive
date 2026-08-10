@@ -89,8 +89,7 @@ export async function registerUser(input: RegisterInput): Promise<User> {
     lastName: input.lastName.trim(),
     email: input.email.trim(),
     phone: input.phone?.trim() || undefined,
-    // საწყისი ადმინის ფოსტა ავტომატურად ADMIN-ია (იხ. config/admins.ts)
-    role: isBootstrapAdminEmail(input.email) ? 'ADMIN' : input.role,
+    role: input.role,
     preferredCity: input.preferredCity,
     category: input.category,
     transmission: input.transmission,
@@ -99,7 +98,7 @@ export async function registerUser(input: RegisterInput): Promise<User> {
 
   await setDoc(doc(firestore, COLLECTIONS.users, cred.user.uid), profile);
   await hydrate(cred.user.uid);
-  return profile;
+  return applyBootstrapAdmin(profile, cred.user.email);
 }
 
 /**
@@ -195,7 +194,7 @@ export async function completeGoogleProfile(input: {
     lastName: input.lastName.trim(),
     email: fbUser.email ?? '',
     phone: input.phone?.trim() || undefined,
-    role: isBootstrapAdminEmail(fbUser.email) ? 'ADMIN' : input.role,
+    role: input.role,
     preferredCity: input.preferredCity,
     category: input.category,
     transmission: input.transmission,
@@ -204,7 +203,7 @@ export async function completeGoogleProfile(input: {
 
   await setDoc(doc(firestore, COLLECTIONS.users, fbUser.uid), profile);
   await hydrate(fbUser.uid);
-  return profile;
+  return applyBootstrapAdmin(profile, fbUser.email);
 }
 
 export async function logoutUser(): Promise<void> {
@@ -218,23 +217,31 @@ export async function logoutUser(): Promise<void> {
  * განზრახ არ იქმნება ავტომატური ჩანაწერი: Google-ით პირველ შესვლაზე
  * მომხმარებელმა თავად უნდა აირჩიოს როლი, კატეგორია და ტრანსმისია.
  */
+/**
+ * საწყისი ადმინის როლის მინიჭება.
+ *
+ * როლი ბაზაში ჩვეულებრივად იწერება (STUDENT/INSTRUCTOR), რადგან ADMIN-ის
+ * პირდაპირ ჩაწერას წესები კრძალავს. ADMIN ენიჭება აპლიკაციის დონეზე,
+ * ხოლო ბაზაში ავწევის მცდელობა ფონურია — თუ წესები ჯერ არ არის განახლებული,
+ * ის ჩავარდება უხმაუროდ და როლი მაინც იმუშავებს მიმდინარე სესიაზე.
+ */
+function applyBootstrapAdmin(profile: User, email: string | null): User {
+  if (!isBootstrapAdminEmail(email ?? profile.email)) return profile;
+  if (profile.role === 'ADMIN' || profile.role === 'SUPER_ADMIN') return profile;
+
+  const upgraded: User = { ...profile, role: 'ADMIN' };
+  void setDoc(doc(firestore, COLLECTIONS.users, profile.id), { role: 'ADMIN' }, { merge: true }).catch(
+    () => {
+      // წესები ჯერ არ იცნობს საწყის ადმინს — ესეც მოსალოდნელია
+    },
+  );
+  return upgraded;
+}
+
 async function fetchUserProfile(fbUser: FirebaseUser): Promise<User | null> {
   const snap = await getDoc(doc(firestore, COLLECTIONS.users, fbUser.uid));
   if (!snap.exists()) return null;
-
-  const profile = snap.data() as User;
-
-  // საწყისი ადმინი — თუ ჩანაწერი ჯერ ADMIN არ არის, ავწევთ და შევინახავთ
-  if (isBootstrapAdminEmail(fbUser.email) && profile.role !== 'ADMIN' && profile.role !== 'SUPER_ADMIN') {
-    const upgraded: User = { ...profile, role: 'ADMIN' };
-    try {
-      await setDoc(doc(firestore, COLLECTIONS.users, fbUser.uid), upgraded, { merge: true });
-    } catch {
-      // ჩაწერა ვერ მოხერხდა — როლი მაინც მოქმედებს ამ სესიაზე
-    }
-    return upgraded;
-  }
-  return profile;
+  return applyBootstrapAdmin(snap.data() as User, fbUser.email);
 }
 
 export interface PendingProfile {
