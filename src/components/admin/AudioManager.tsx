@@ -242,7 +242,7 @@ export const AudioManager: React.FC<{ adminName: string }> = ({ adminName }) => 
 
                   <div className="flex items-center gap-2 shrink-0">
                     <button
-                      onClick={() => void AudioEngine.playInstruction(a.key)}
+                      onClick={() => void AudioEngine.playInstruction(a.key, { force: true })}
                       title="მოსმენა"
                       aria-label={`მოსმენა: ${a.titleKa}`}
                       className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"

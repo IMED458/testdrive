@@ -75,7 +75,8 @@ export class ExamEngine {
       ],
       evaluations: [],
       gpsQuality: 'GOOD',
-      pathHistory: [route.startPoint],
+      // ცარიელი — ჩაიწერება მხოლოდ რეალური GPS-წერტილები
+      pathHistory: [],
       whatWentWell: [],
       needsImprovement: [],
     };
@@ -105,8 +106,17 @@ export class ExamEngine {
     this.session.startedAt = new Date().toISOString();
     this.addSystemEvent('ROUTE_STARTED');
 
+    // მარშრუტის ყველა ხმა წინასწარ იტვირთება — გზაზე დაყოვნება დაუშვებელია
+    AudioEngine.preloadRouteAudio([
+      ...new Set(this.routeEngine.getRoute().instructions.map((i) => i.audioKey)),
+      'EXAM_START',
+      'EXAM_FINISHED',
+      'ROUTE_DEVIATION',
+      'GPS_WARNING',
+    ]);
+
     // Play start audio
-    AudioEngine.playInstruction('START_EXAM');
+    AudioEngine.playInstruction('EXAM_START');
 
     if (this.timerInterval) clearInterval(this.timerInterval);
     this.timerInterval = setInterval(() => {
@@ -133,14 +143,18 @@ export class ExamEngine {
   /**
    * Updates GPS position during driving
    */
-  public updateGpsPosition(coords: Coordinates, accuracyMeters = 5) {
+  public updateGpsPosition(coords: Coordinates, accuracyMeters: number) {
     this.session.gpsQuality = evaluateGpsQuality(accuracyMeters);
     this.session.pathHistory.push(coords);
 
     if (this.stage !== 'DRIVING') return;
 
-    // Route engine update
-    const triggers = this.routeEngine.updateLocation(coords, this.session.durationSeconds);
+    // სიზუსტე გადაეცემა — გეოზონები მას ითვალისწინებენ
+    const triggers = this.routeEngine.updateLocation(
+      coords,
+      this.session.durationSeconds,
+      accuracyMeters,
+    );
 
     if (triggers.triggeredInstruction) {
       AudioEngine.playInstruction(triggers.triggeredInstruction.audioKey);
@@ -158,6 +172,8 @@ export class ExamEngine {
     }
 
     if (triggers.offRouteWarning) {
+      // ხმაც უნდა გაისმას — ადრე მხოლოდ ჟურნალში იწერებოდა
+      AudioEngine.playInstruction('ROUTE_DEVIATION');
       this.addSystemEvent('ROUTE_DEVIATION', {
         distMeters: this.routeEngine.getState().offRouteDistanceMeters,
       });
@@ -306,6 +322,13 @@ export class ExamEngine {
     } else {
       this.session.result = summary.result;
     }
+
+    // ტაიმერი აუცილებლად უნდა გაჩერდეს — თორემ სესიის შემდეგაც ითვლიდა
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+      this.timerInterval = null;
+    }
+    this.stage = 'COMPLETED';
 
     this.addSystemEvent('EXAM_COMPLETED', { finalResult: this.session.result });
     AudioEngine.playInstruction('EXAM_FINISHED');

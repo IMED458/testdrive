@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RouteVersion, DrivingCategory, TransmissionType, ExamMode, TechnicalQuestion } from '../../types';
 import { ShieldCheck, Navigation, Volume2, CheckCircle2, HelpCircle, AlertTriangle, Play } from 'lucide-react';
 import { getTechnicalQuestions } from '../../services/db';
 import { AudioEngine } from '../../engine/AudioEngine';
+import { Geo, describeGeoStatus, ACCURACY_GOOD_M, type GeoState } from '../../services/geolocation';
 
 interface ExamPreCheckProps {
   mode: ExamMode;
@@ -43,8 +44,18 @@ export const ExamPreCheck: React.FC<ExamPreCheckProps> = ({
   // Audio test
   const [audioTested, setAudioTested] = useState(false);
 
-  const handleTestAudio = () => {
-    AudioEngine.playInstruction('START_EXAM');
+  // რეალური GPS — ადრე ეს ეკრანი მხოლოდ სტატიკურ ტექსტს აჩვენებდა
+  const [geo, setGeo] = useState<GeoState>(Geo.snapshot);
+  useEffect(() => {
+    if (step !== 'GPS') return;
+    Geo.start();
+    return Geo.subscribe(setGeo);
+  }, [step]);
+
+  const handleTestAudio = async () => {
+    // ღილაკზე დაჭერა არის ის ჟესტი, რომელსაც ბრაუზერი ითხოვს autoplay-ისთვის
+    await AudioEngine.unlock();
+    await AudioEngine.playInstruction('AUDIO_TEST', { force: true });
     setAudioTested(true);
   };
 
@@ -172,30 +183,78 @@ export const ExamPreCheck: React.FC<ExamPreCheckProps> = ({
         </div>
       )}
 
-      {/* STEP 3: GPS CHECK */}
+      {/* STEP 3: GPS CHECK — რეალური გაზომვა */}
       {step === 'GPS' && (
         <div className="space-y-5 text-center py-4">
-          <div className="w-16 h-16 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 flex items-center justify-center mx-auto">
-            <Navigation className="w-8 h-8 animate-pulse" />
+          <div
+            className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto ${
+              geo.status === 'READY'
+                ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-600'
+                : geo.status === 'DENIED' || geo.status === 'UNAVAILABLE' || geo.status === 'TIMEOUT'
+                  ? 'bg-rose-50 dark:bg-rose-950 text-rose-600'
+                  : 'bg-indigo-50 dark:bg-indigo-950 text-indigo-600'
+            }`}
+          >
+            <Navigation
+              className={`w-8 h-8 ${geo.status === 'ACQUIRING' || geo.status === 'IMPROVING' || geo.status === 'REQUESTING_PERMISSION' ? 'animate-pulse' : ''}`}
+            />
           </div>
+
           <div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">GPS სიგნალი აქტიურია</h3>
-            <p className="text-xs text-slate-500 mt-1">
-              სიზუსტე: ~5 მეტრი (GOOD) • საგამოცდო ზონასთან სიახლოვე დადასტურებულია
-            </p>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+              {describeGeoStatus(geo)}
+            </h3>
+            {geo.fix ? (
+              <p className="text-xs text-slate-500 mt-1">
+                სიზუსტე: ±{Math.round(geo.fix.accuracy)} მეტრი
+                {geo.fix.accuracy > ACCURACY_GOOD_M && ' — ველოდებით უკეთესს'}
+              </p>
+            ) : (
+              <p className="text-xs text-slate-500 mt-1">
+                მდებარეობა ჯერ არ მიგვიღია. საჭიროა ლოკაციის ნებართვა.
+              </p>
+            )}
+            {geo.errorMessage && (
+              <p className="text-xs text-rose-600 dark:text-rose-400 mt-2 max-w-sm mx-auto">
+                {geo.errorMessage}
+              </p>
+            )}
           </div>
+
+          {(geo.status === 'DENIED' || geo.status === 'UNAVAILABLE' || geo.status === 'TIMEOUT') && (
+            <button
+              onClick={() => Geo.start()}
+              className="text-xs font-bold text-indigo-600 dark:text-indigo-400 underline"
+            >
+              ხელახლა ცდა
+            </button>
+          )}
 
           <div className="pt-4 flex justify-between items-center">
             <button onClick={() => setStep('SAFETY')} className="text-xs font-bold text-slate-500">
               ← უკან
             </button>
+            {/* გაგრძელება დაშვებულია GPS-ის გარეშეც, მაგრამ ღიად ნათქვამია რას ნიშნავს */}
             <button
               onClick={() => setStep('AUDIO')}
-              className="bg-indigo-600 text-white font-bold text-xs px-6 py-3 rounded-xl hover:bg-indigo-700 shadow-md"
+              className={`font-bold text-xs px-6 py-3 rounded-xl shadow-md ${
+                geo.status === 'READY'
+                  ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                  : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-300'
+              }`}
             >
-              შემდეგი: ხმის შემოწმება →
+              {geo.status === 'READY'
+                ? 'შემდეგი: ხმის შემოწმება →'
+                : 'გაგრძელება GPS-ის გარეშე →'}
             </button>
           </div>
+
+          {geo.status !== 'READY' && (
+            <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+              GPS-ის გარეშე მარშრუტის ავტომატური თვალყური და მისვლის დაფიქსირება არ იმუშავებს —
+              შეფასება მხოლოდ ხელით იქნება შესაძლებელი.
+            </p>
+          )}
         </div>
       )}
 

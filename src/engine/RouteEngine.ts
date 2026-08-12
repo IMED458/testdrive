@@ -31,11 +31,21 @@ export interface RouteEngineState {
   };
 }
 
+/** ზედიზედ რამდენი წერტილი უნდა ადასტურებდეს ზონაში შესვლას */
+const ARRIVAL_CONFIRMATIONS = 2;
+/** მარშრუტიდან გადახვევის ზღვარი და დაბრუნების ჰისტერეზისი (მ) */
+const OFF_ROUTE_ENTER_M = 45;
+const OFF_ROUTE_EXIT_M = 30;
+/** ამაზე უარესი სიზუსტით ზონაში შესვლა არ დასტურდება */
+const MAX_TRUSTED_ACCURACY_M = 75;
+
 export class RouteEngine {
   private route: RouteVersion;
   private state: RouteEngineState;
   private prevPosition: Coordinates | null = null;
   private prevTimestampSeconds = 0;
+  /** კანდიდატი ზონები — id → ზედიზედ დადასტურებების რაოდენობა */
+  private pendingArrivals = new Map<string, number>();
 
   constructor(route: RouteVersion) {
     this.route = route;
@@ -67,7 +77,8 @@ export class RouteEngine {
    */
   public updateLocation(
     currentLocation: Coordinates,
-    elapsedSeconds: number
+    elapsedSeconds: number,
+    accuracyMeters = 0
   ): {
     triggeredInstruction?: RouteInstruction;
     reachedCheckpoint?: Checkpoint;
@@ -93,12 +104,17 @@ export class RouteEngine {
     const distToPolyline = distanceToPolyline(currentLocation, this.route.polyline);
     this.state.offRouteDistanceMeters = Math.round(distToPolyline);
 
-    if (distToPolyline > 45) {
-      if (!this.state.isOffRoute) {
-        this.state.isOffRoute = true;
-        events.offRouteWarning = true;
-      }
-    } else {
+    /*
+     * ჰისტერეზისი: შესვლა 45 მ-ზე, დაბრუნება 30 მ-ზე.
+     * ერთი ზღვრით GPS-ის მერყეობა ზღვარზე გაფრთხილებას მრავალჯერ ისვრიდა.
+     * ასევე ცდომილება აკლდება — ±100 მ სიზუსტით გადახვევა ვერ დადასტურდება.
+     */
+    const effectiveDeviation = Math.max(0, distToPolyline - accuracyMeters);
+
+    if (!this.state.isOffRoute && effectiveDeviation > OFF_ROUTE_ENTER_M) {
+      this.state.isOffRoute = true;
+      events.offRouteWarning = true;
+    } else if (this.state.isOffRoute && distToPolyline < OFF_ROUTE_EXIT_M) {
       this.state.isOffRoute = false;
     }
 
@@ -111,7 +127,7 @@ export class RouteEngine {
       const dist = calculateDistanceMeters(currentLocation, inst.location);
       const radius = inst.triggerRadiusMeters || 25;
 
-      if (dist <= radius) {
+      if (this.confirmArrival(inst.id, dist, radius, accuracyMeters)) {
         this.state.completedInstructions.push(inst.id);
         this.state.activeInstruction = inst;
         this.state.activeManeuver = inst.maneuverType;
@@ -127,7 +143,7 @@ export class RouteEngine {
 
     for (const cp of uncompletedCheckpoints) {
       const dist = calculateDistanceMeters(currentLocation, cp.location);
-      if (dist <= cp.radiusMeters) {
+      if (this.confirmArrival(cp.id, dist, cp.radiusMeters, accuracyMeters)) {
         this.state.completedCheckpoints.push(cp.id);
         this.state.activeCheckpoint = cp;
         events.reachedCheckpoint = cp;
@@ -149,5 +165,38 @@ export class RouteEngine {
     }
 
     return events;
+  }
+
+  /**
+   * ზონაში შესვლის დადასტურება.
+   *
+   * ერთი ცუდი წერტილი საკმარისი არ არის — საჭიროა ზედიზედ რამდენიმე.
+   * ცდომილება რადიუსს ამატებს მხოლოდ იმ ზღვრამდე, სადამდეც მას ვენდობით:
+   * თუ სამიზნე 20 მ-შია, ცდომილება კი ±150 მ, მისვლა ვერ დადასტურდება.
+   */
+  private confirmArrival(
+    id: string,
+    distanceMeters: number,
+    radiusMeters: number,
+    accuracyMeters: number
+  ): boolean {
+    const trusted = accuracyMeters <= MAX_TRUSTED_ACCURACY_M;
+    const inside = distanceMeters <= radiusMeters;
+
+    if (!inside || !trusted) {
+      this.pendingArrivals.delete(id);
+      return false;
+    }
+
+    // მკვეთრად ზუსტი წერტილი ზონის სიღრმეში — დაუყოვნებლივ ჩაითვლება
+    const deepInside = distanceMeters + accuracyMeters <= radiusMeters;
+    const count = (this.pendingArrivals.get(id) ?? 0) + 1;
+    this.pendingArrivals.set(id, count);
+
+    if (deepInside || count >= ARRIVAL_CONFIRMATIONS) {
+      this.pendingArrivals.delete(id);
+      return true;
+    }
+    return false;
   }
 }

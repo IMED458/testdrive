@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ExamEngine } from '../../engine/ExamEngine';
 import { RouteMap } from '../map/RouteMap';
 import { InstructorLiveView } from './InstructorLiveView';
 import { AudioEngine } from '../../engine/AudioEngine';
 import { Volume2, VolumeX, Pause, Play, AlertOctagon, Navigation, MapPin } from 'lucide-react';
+import { Geo, describeGeoStatus, type GeoState } from '../../services/geolocation';
 
 interface ExamDrivingViewProps {
   examEngine: ExamEngine;
@@ -25,23 +26,34 @@ export const ExamDrivingView: React.FC<ExamDrivingViewProps> = ({
   const [isPaused, setIsPaused] = useState(false);
   const [isMuted, setIsMuted] = useState(AudioEngine.getIsMuted());
 
-  // Simulated GPS position progress tick for testing
-  const [simIndex, setSimIndex] = useState(0);
+  /**
+   * რეალური GPS.
+   *
+   * ადრე აქ იყო ყალბი სიმულაცია: setInterval ყოველ 3 წამში მარშრუტის
+   * შემდეგ წერტილზე „გადაჰქონდა" მომხმარებელი და სიზუსტეს 5 მ-ს უწერდა.
+   * ახლა მდებარეობა მოწყობილობიდან მოდის, ცდომილებითურთ.
+   */
+  const [geo, setGeo] = useState<GeoState>(Geo.snapshot);
+  // ბოლო დამუშავებული წერტილის დრო — ერთი და იმავე reading-ის ორჯერ დამუშავების წინააღმდეგ
+  const lastHandledRef = useRef<number>(0);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (examEngine.getStage() === 'DRIVING' && route.polyline.length > 0) {
-        const nextIdx = (simIndex + 1) % route.polyline.length;
-        setSimIndex(nextIdx);
-        const nextPos = route.polyline[nextIdx];
-        examEngine.updateGpsPosition(nextPos, 5);
-        setRouteState({ ...routeEngine.getState() });
-      }
-    }, 3000);
+    Geo.start();
+    // ერთი გამოწერა; დაბრუნებული ფუნქცია watch-საც აჩერებს, თუ სხვა მსმენელი აღარაა
+    const unsubscribe = Geo.subscribe(setGeo);
+    return unsubscribe;
+  }, []);
 
-    return () => clearInterval(interval);
-  }, [simIndex, route, examEngine, routeEngine]);
+  useEffect(() => {
+    const fix = geo.fix;
+    if (!fix) return;
+    if (examEngine.getStage() !== 'DRIVING') return;
+    if (fix.timestamp === lastHandledRef.current) return;
+    lastHandledRef.current = fix.timestamp;
 
+    examEngine.updateGpsPosition(fix.coords, fix.accuracy);
+    setRouteState({ ...routeEngine.getState() });
+  }, [geo.fix, examEngine, routeEngine]);
   const handleToggleMute = () => {
     const next = !isMuted;
     setIsMuted(next);
@@ -74,7 +86,9 @@ export const ExamDrivingView: React.FC<ExamDrivingViewProps> = ({
           </div>
           <div className="text-xs text-slate-400 border-l border-slate-700 pl-3">
             <p className="font-bold text-white">{routeState.currentSpeedKmh} კმ/სთ</p>
-            <p className="text-[10px]">GPS: {session.gpsQuality}</p>
+            <p className="text-[10px]">
+              GPS: {geo.fix ? `±${Math.round(geo.fix.accuracy)}მ` : '—'}
+            </p>
           </div>
         </div>
 
@@ -96,6 +110,37 @@ export const ExamDrivingView: React.FC<ExamDrivingViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* GPS-ის რეალური მდგომარეობა — არასოდეს ვამბობთ „მუშაობს", თუ წერტილი არ გვაქვს */}
+      {geo.status !== 'READY' && (
+        <div
+          className={`p-3 rounded-2xl border flex items-start gap-3 text-sm ${
+            geo.status === 'DENIED' || geo.status === 'UNAVAILABLE' || geo.status === 'TIMEOUT'
+              ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-200'
+              : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-200'
+          }`}
+          role="status"
+        >
+          <Navigation className="w-5 h-5 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold">{describeGeoStatus(geo)}</p>
+            {geo.fix && (
+              <p className="text-xs opacity-80 mt-0.5">
+                მიმდინარე სიზუსტე: ±{Math.round(geo.fix.accuracy)} მ — ავტომატური შეფასება
+                შეზღუდულია.
+              </p>
+            )}
+            {(geo.status === 'DENIED' || geo.status === 'UNAVAILABLE') && (
+              <button
+                onClick={() => Geo.start()}
+                className="mt-2 text-xs font-bold underline"
+              >
+                ხელახლა ცდა
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Voice Instruction Banner */}
       <div className="bg-indigo-600 text-white p-4 rounded-2xl shadow-lg flex items-center justify-between gap-3">
@@ -129,7 +174,7 @@ export const ExamDrivingView: React.FC<ExamDrivingViewProps> = ({
           {/* Map View */}
           <RouteMap
             route={route}
-            currentPosition={session.pathHistory[session.pathHistory.length - 1]}
+            {...(geo.fix ? { currentPosition: geo.fix.coords } : {})}
             showPolyline={isLearningMode} // Strict exam hides polyline to simulate real test
             showInstructions={isLearningMode}
             height="360px"

@@ -60,18 +60,27 @@ export function distanceToPolyline(point: Coordinates, polyline: Coordinates[]):
 }
 
 function distanceToSegment(p: Coordinates, v: Coordinates, w: Coordinates): number {
-  const l2 = calculateDistanceMeters(v, w);
-  if (l2 === 0) return calculateDistanceMeters(p, v);
+  if (calculateDistanceMeters(v, w) === 0) return calculateDistanceMeters(p, v);
 
-  // Approximate projection in Cartesian for short distance
-  const dx = w.lng - v.lng;
+  /*
+   * გრძედის გრადუსი მერიდიანისკენ მოკლდება cos(lat)-ჯერ.
+   * ამ შესწორების გარეშე პროექცია მახინჯდება — თელავის განედზე (41.9°)
+   * გრძედის ერთი გრადუსი განედის გრადუსის მხოლოდ ~74%-ია,
+   * ამიტომ მარშრუტიდან გადახვევის მანძილი არასწორად ითვლებოდა.
+   */
+  const latScale = Math.cos(toRadians((v.lat + w.lat) / 2));
+
+  const dx = (w.lng - v.lng) * latScale;
   const dy = w.lat - v.lat;
-  let t = ((p.lng - v.lng) * dx + (p.lat - v.lat) * dy) / (dx * dx + dy * dy);
+  const px = (p.lng - v.lng) * latScale;
+  const py = p.lat - v.lat;
+
+  let t = (px * dx + py * dy) / (dx * dx + dy * dy);
   t = Math.max(0, Math.min(1, t));
 
   const projection: Coordinates = {
     lat: v.lat + t * dy,
-    lng: v.lng + t * dx,
+    lng: v.lng + t * (w.lng - v.lng),
   };
 
   return calculateDistanceMeters(p, projection);

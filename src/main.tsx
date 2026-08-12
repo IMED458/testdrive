@@ -17,9 +17,13 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { initAnalytics } from './services/firebase';
+import { AudioEngine } from './engine/AudioEngine';
 
 // Firebase ინიციალიზდება აპლიკაციის ჩატვირთვისთანავე; Analytics არასავალდებულოა
 void initAnalytics();
+
+// ხმის სისტემა იხსნება მომხმარებლის პირველივე ჟესტზე (autoplay policy)
+AudioEngine.installUnlockHandlers();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
