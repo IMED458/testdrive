@@ -35,8 +35,11 @@ import { ExamReportView } from './components/exam/ExamReportView';
 
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { AuthScreen } from './components/auth/AuthScreen';
+import { AudioEngine } from './engine/AudioEngine';
 import { watchAuth, logoutUser, type PendingProfile } from './services/auth';
 import { onCloudChange } from './services/cloudStore';
+import { fetchUploadedAudio, mergeAudioAssets } from './services/audioStorage';
+import { DEFAULT_AUDIO_ASSETS } from './data/initialData';
 import { ensureStudentProfile, getStudentProfileByUserId, setCurrentUser, getCurrentUser } from './services/db';
 
 export function App() {
@@ -48,8 +51,32 @@ export function App() {
   const [, setCloudTick] = useState(0);
   // Google-ით შესული, პროფილშეუვსებელი მომხმარებელი
   const [pendingProfile, setPendingProfile] = useState<PendingProfile | null>(null);
+  // მიმდინარე სიმულაციიდან გასვლის დადასტურება
+  const [pendingExitConfirm, setPendingExitConfirm] = useState(false);
 
   useEffect(() => onCloudChange(() => setCloudTick((t) => t + 1)), []);
+
+  /*
+   * ატვირთული ხმები ადრე მხოლოდ ადმინის პანელში იტვირთებოდა, ამიტომ
+   * მოსწავლე და ინსტრუქტორი ყოველთვის სინთეზურ ხმას იღებდნენ.
+   * ახლა იტვირთება აპლიკაციის გაშვებისთანავე, ყველა როლისთვის.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const uploaded = await fetchUploadedAudio();
+        if (cancelled) return;
+        AudioEngine.applyUploadedAssets(mergeAudioAssets(DEFAULT_AUDIO_ASSETS, uploaded));
+      } catch (err) {
+        // ხმები ვერ ჩაიტვირთა — სინთეზური ხმა რჩება სათადარიგოდ
+        console.warn('[audio] ატვირთული ხმები ვერ ჩაიტვირთა:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id]);
 
   useEffect(() => {
     return watchAuth((user, role, pending) => {
@@ -104,6 +131,28 @@ export function App() {
       setIsSafetyModalOpen(true);
     }
   }, [currentUser?.id]);
+
+  /** მთავარზე დაბრუნება — მიმდინარე გამოცდიდანაც */
+  const handleGoHome = () => {
+    if (examState === 'DRIVING') {
+      setPendingExitConfirm(true);
+      return;
+    }
+    setExamState('IDLE');
+    setExamEngine(null);
+    setCompletedSession(null);
+    setSelectedStudentForInstructor(null);
+    setActiveTab('dashboard');
+  };
+
+  const exitToHome = () => {
+    setPendingExitConfirm(false);
+    setExamState('IDLE');
+    setExamEngine(null);
+    setCompletedSession(null);
+    setSelectedStudentForInstructor(null);
+    setActiveTab('dashboard');
+  };
 
   // Handle Start Exam Click
   const handleStartExamFlow = (mode: ExamMode, route?: RouteVersion) => {
@@ -171,6 +220,7 @@ export function App() {
       <Header
         currentUser={currentUser}
         viewRole={currentRole}
+        onGoHome={handleGoHome}
         onLogout={() => { void logoutUser(); }}
         onRoleChange={(role) => {
           // როლს ცვლის მხოლოდ ადმინი — სხვისთვის როლი Firestore-იდან მოდის
@@ -292,6 +342,39 @@ export function App() {
             setSelectedStudentForInstructor(null);
           }}
         />
+      )}
+
+      {/* მიმდინარე სიმულაციიდან გასვლის დადასტურება */}
+      {pendingExitConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="სიმულაციიდან გასვლა"
+            className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 space-y-4"
+          >
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+              სიმულაციიდან გასვლა
+            </h3>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              მიმდინარე სიმულაცია შეწყდება და შედეგი არ შეინახება. დარწმუნებული ხარ?
+            </p>
+            <div className="flex flex-col sm:flex-row-reverse gap-2">
+              <button
+                onClick={exitToHome}
+                className="flex-1 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold"
+              >
+                გასვლა
+              </button>
+              <button
+                onClick={() => setPendingExitConfirm(false)}
+                className="flex-1 py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-700 dark:text-slate-200"
+              >
+                გაგრძელება
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Safety & Informed Consent Modal */}

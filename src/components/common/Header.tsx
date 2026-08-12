@@ -7,6 +7,8 @@ interface HeaderProps {
   onRoleChange: (role: UserRole) => void;
   onOpenDisclaimer: () => void;
   onLogout?: () => void;
+  /** ლოგოზე დაჭერა — მთავარზე დაბრუნება */
+  onGoHome?: () => void;
   /** ამჟამად ნანახი როლი — გადამრთველის ხაზგასმა ამას ეყრდნობა, არა ანგარიშის როლს */
   viewRole?: UserRole;
   activeCity: string;
@@ -19,14 +21,20 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenDisclaimer,
   onLogout,
   viewRole,
+  onGoHome,
   activeCity,
   onCityChange,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 px-4 py-3 transition-all">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
-        {/* Logo & Simulator Badge */}
-        <div className="flex items-center gap-3">
+        {/* ლოგო — მთავარზე დაბრუნების ღილაკი */}
+        <button
+          type="button"
+          onClick={onGoHome}
+          aria-label="მთავარ გვერდზე დაბრუნება"
+          className="flex items-center gap-3 text-left rounded-xl hover:opacity-80 transition-opacity"
+        >
           <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold shadow-md shadow-indigo-600/20">
             <Car className="w-5 h-5" />
           </div>
@@ -43,7 +51,7 @@ export const Header: React.FC<HeaderProps> = ({
               ქალაქში მართვის პრაქტიკული გამოცდის მოსამზადებელი პლატფორმა
             </p>
           </div>
-        </div>
+        </button>
 
         {/* City Selector & Role Switcher */}
         <div className="flex items-center gap-2">

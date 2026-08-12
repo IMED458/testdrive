@@ -12,6 +12,9 @@
 import { doc, getDocs, collection, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, COLLECTIONS } from './firebase';
 import type { AudioAsset } from '../types';
+import { normalizeAudioDataUrl } from '../lib/audioMime';
+
+export { normalizeAudioDataUrl };
 
 export const ALLOWED_AUDIO_TYPES = [
   'audio/mpeg',
@@ -79,7 +82,7 @@ export async function uploadAudio(
   const error = validateAudioFile(file);
   if (error) throw new Error(error);
 
-  const dataUrl = await readAsDataUrl(file);
+  const dataUrl = normalizeAudioDataUrl(await readAsDataUrl(file));
   const durationSeconds = await readDuration(file);
 
   try {

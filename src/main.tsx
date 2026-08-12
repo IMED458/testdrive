@@ -25,6 +25,17 @@ void initAnalytics();
 // ხმის სისტემა იხსნება მომხმარებლის პირველივე ჟესტზე (autoplay policy)
 AudioEngine.installUnlockHandlers();
 
+/*
+ * დიაგნოსტიკა მხოლოდ განვითარების რეჟიმში.
+ * კონსოლში: __debug.audio.recordedCount(), __debug.geo.snapshot
+ * production build-ში ეს ბლოკი საერთოდ არ ხვდება (import.meta.env.DEV).
+ */
+if (import.meta.env.DEV) {
+  void import('./services/geolocation').then(({ Geo }) => {
+    (window as unknown as Record<string, unknown>).__debug = { audio: AudioEngine, geo: Geo };
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

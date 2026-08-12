@@ -1,5 +1,6 @@
 import { DEFAULT_AUDIO_ASSETS } from '../data/initialData';
 import { AudioAsset } from '../types';
+import { normalizeAudioDataUrl } from '../lib/audioMime';
 
 /**
  * AudioEngine — ქართული ხმოვანი მითითებები.
@@ -123,9 +124,11 @@ class AudioEngineManager {
     assets.forEach((a) => {
       this.audioCache.set(a.key, a);
       if (a.url) {
+        // ადრე ატვირთული ფაილების MIME-იც სწორდება — iOS-ის თავსებადობისთვის
+        const url = normalizeAudioDataUrl(a.url);
         const existing = this.preloadedFiles.get(a.key);
-        if (existing?.src === a.url) return;
-        const el = new Audio(a.url);
+        if (existing?.src === url) return;
+        const el = new Audio(url);
         el.preload = 'auto';
         this.preloadedFiles.set(a.key, el);
       } else {
@@ -152,7 +155,7 @@ class AudioEngineManager {
         return;
       }
       if (asset.url && !this.preloadedFiles.has(key)) {
-        const el = new Audio(asset.url);
+        const el = new Audio(normalizeAudioDataUrl(asset.url));
         el.preload = 'auto';
         this.preloadedFiles.set(key, el);
       }
